@@ -256,3 +256,33 @@ class RunReports(APIModel):
     reports: dict[str, Any] = Field(default_factory=dict)
     final_report: str | None = None
     decision: str | None = None
+
+
+class HistoricalReport(APIModel):
+    schema_version: int = 1
+    archived_at: datetime
+    run: RunInfo
+    config: WebConfig
+    reports: dict[str, Any] = Field(default_factory=dict)
+    final_report: str | None = None
+    decision: str | None = None
+
+
+class ReportHistoryItem(APIModel):
+    run_id: str
+    ticker: str
+    analysis_date: date
+    status: RunState
+    submitted_at: datetime
+    ended_at: datetime | None = None
+    decision: str | None = None
+    provider: str
+    output_language: str
+    analysts: list[str] = Field(default_factory=list)
+    research_depth: int
+    stats: dict[str, Any] = Field(default_factory=dict)
+    archived_at: datetime
+
+
+class ReportHistoryList(APIModel):
+    items: list[ReportHistoryItem] = Field(default_factory=list)

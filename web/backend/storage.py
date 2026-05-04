@@ -2,13 +2,23 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from tradingagents.default_config import DEFAULT_CONFIG
 
 from .constants import SECRET_FIELDS
-from .schemas import SecretFieldStatus, WebConfig
+from .schemas import (
+    HistoricalReport,
+    ReportHistoryItem,
+    ReportHistoryList,
+    RunInfo,
+    RunReports,
+    SecretFieldStatus,
+    WebConfig,
+)
 
 
 def web_data_dir() -> Path:
@@ -33,7 +43,9 @@ class WebStorage:
         self.root = root or web_data_dir()
         self.config_path = self.root / "config.json"
         self.secrets_path = self.root / "secrets.json"
+        self.history_dir = self.root / "history"
         self.root.mkdir(parents=True, exist_ok=True)
+        self.history_dir.mkdir(parents=True, exist_ok=True)
 
     def load_config(self) -> WebConfig:
         if not self.config_path.exists():
@@ -89,6 +101,77 @@ class WebStorage:
             key: SecretFieldStatus(configured=bool(secrets.get(key)), masked=mask_secret(secrets.get(key)))
             for key in SECRET_FIELDS
         }
+
+    def save_report_history(self, run: RunInfo, config: WebConfig, reports: RunReports) -> HistoricalReport:
+        archive = HistoricalReport(
+            archived_at=datetime.now(timezone.utc),
+            run=run,
+            config=config,
+            reports=reports.reports,
+            final_report=reports.final_report,
+            decision=reports.decision,
+        )
+        path = self._history_path(run.id)
+        if path is None:
+            raise ValueError("Run ID must be a UUID.")
+        tmp_path = path.with_suffix(".tmp")
+        with tmp_path.open("w", encoding="utf-8") as handle:
+            json.dump(archive.model_dump(mode="json", by_alias=True), handle, indent=2, ensure_ascii=False)
+        os.chmod(tmp_path, 0o600)
+        tmp_path.replace(path)
+        os.chmod(path, 0o600)
+        return archive
+
+    def list_report_history(self, limit: int = 50) -> ReportHistoryList:
+        limit = max(1, min(limit, 200))
+        items = [self._history_item(archive) for archive in self._load_history_archives()]
+        items.sort(key=lambda item: item.ended_at or item.submitted_at, reverse=True)
+        return ReportHistoryList(items=items[:limit])
+
+    def load_report_history(self, run_id: str) -> HistoricalReport | None:
+        path = self._history_path(run_id)
+        if path is None or not path.exists():
+            return None
+        return self._load_history_file(path)
+
+    def _history_path(self, run_id: str) -> Path | None:
+        try:
+            normalized = str(UUID(run_id))
+        except ValueError:
+            return None
+        return self.history_dir / f"{normalized}.json"
+
+    def _load_history_archives(self) -> list[HistoricalReport]:
+        archives: list[HistoricalReport] = []
+        for path in self.history_dir.glob("*.json"):
+            archive = self._load_history_file(path)
+            if archive is not None:
+                archives.append(archive)
+        return archives
+
+    def _load_history_file(self, path: Path) -> HistoricalReport | None:
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                return HistoricalReport.model_validate(json.load(handle))
+        except (OSError, ValueError, TypeError):
+            return None
+
+    def _history_item(self, archive: HistoricalReport) -> ReportHistoryItem:
+        return ReportHistoryItem(
+            run_id=archive.run.id,
+            ticker=archive.run.ticker,
+            analysis_date=archive.run.analysis_date,
+            status=archive.run.status,
+            submitted_at=archive.run.submitted_at,
+            ended_at=archive.run.ended_at,
+            decision=archive.decision or archive.run.decision,
+            provider=archive.config.llm_provider,
+            output_language=archive.config.output_language,
+            analysts=archive.config.analysts,
+            research_depth=archive.config.research_depth,
+            stats=archive.run.stats,
+            archived_at=archive.archived_at,
+        )
 
     def runtime_config(self, web_config: WebConfig) -> dict[str, Any]:
         config = dict(DEFAULT_CONFIG)

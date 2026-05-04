@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import AsyncIterator
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -84,6 +84,19 @@ def get_run_reports(run_id: str) -> dict:
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found.")
     return run.report_payload().model_dump(mode="json", by_alias=True)
+
+
+@app.get("/api/reports/history")
+def list_report_history(limit: int = Query(default=50, ge=1, le=200)) -> dict:
+    return storage.list_report_history(limit=limit).model_dump(mode="json", by_alias=True)
+
+
+@app.get("/api/reports/history/{run_id}")
+def get_report_history(run_id: str) -> dict:
+    archive = storage.load_report_history(run_id)
+    if archive is None:
+        raise HTTPException(status_code=404, detail="Historical report not found.")
+    return archive.model_dump(mode="json", by_alias=True)
 
 
 @app.get("/api/runs/{run_id}/events")

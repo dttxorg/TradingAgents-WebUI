@@ -1,4 +1,4 @@
-import type { Metadata, ReportsPayload, RunInfo, SecretStatus, WebConfig } from './types';
+import type { HistoricalReport, Metadata, ReportHistoryList, ReportsPayload, RunInfo, SecretStatus, WebConfig } from './types';
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -34,4 +34,6 @@ export const api = {
     }),
   run: (id: string) => request<RunInfo>(`/api/runs/${id}`),
   reports: (id: string) => request<ReportsPayload>(`/api/runs/${id}/reports`),
+  reportHistory: (limit = 50) => request<ReportHistoryList>(`/api/reports/history?limit=${limit}`),
+  historicalReport: (id: string) => request<HistoricalReport>(`/api/reports/history/${encodeURIComponent(id)}`),
 };

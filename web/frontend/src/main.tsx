@@ -11,6 +11,7 @@ import {
   CircleDot,
   Database,
   Gauge,
+  History,
   KeyRound,
   Languages,
   Loader2,
@@ -21,7 +22,7 @@ import {
   TerminalSquare,
 } from 'lucide-react';
 import { api } from './api';
-import type { Metadata, ReportsPayload, RunEvent, RunInfo, SecretStatus, WebConfig } from './types';
+import type { Metadata, ReportHistoryItem, ReportsPayload, RunEvent, RunInfo, SecretStatus, WebConfig } from './types';
 import './styles.css';
 
 type Locale = 'en' | 'zh';
@@ -64,6 +65,10 @@ const messages = {
     runId: 'Run ID',
     eventStream: 'Event stream',
     eventsEmpty: 'Live graph events will appear here.',
+    reportHistory: 'Report history',
+    historyEmpty: 'No archived reports yet.',
+    currentReport: 'Current run',
+    archivedReport: 'Archived report',
     customInterfaces: 'Settings / Custom APIs',
     customOpenAiHint: 'OpenAI-compatible Base URL, model IDs, and CUSTOM_OPENAI_API_KEY.',
     customDataHint: 'Choose custom as a data vendor, then point that category at an HTTP service.',
@@ -119,6 +124,10 @@ const messages = {
     runId: '运行 ID',
     eventStream: '事件流',
     eventsEmpty: '实时图执行事件会显示在这里。',
+    reportHistory: '历史报告',
+    historyEmpty: '暂无历史报告。',
+    currentReport: '当前运行',
+    archivedReport: '历史报告',
     customInterfaces: '设置 / 自定义接口',
     customOpenAiHint: 'OpenAI-compatible Base URL、模型 ID 和 CUSTOM_OPENAI_API_KEY。',
     customDataHint: '将数据源选择为 custom 后，把对应分类指向你的 HTTP 数据服务。',
@@ -250,6 +259,8 @@ function App() {
   const [activeRun, setActiveRun] = useState<RunInfo | null>(null);
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [reports, setReports] = useState<ReportsPayload | null>(null);
+  const [history, setHistory] = useState<ReportHistoryItem[]>([]);
+  const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
   const [reportTab, setReportTab] = useState('finalReport');
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setSaving] = useState(false);
@@ -258,11 +269,12 @@ function App() {
   const t = messages[locale];
 
   useEffect(() => {
-    Promise.all([api.metadata(), api.config(), api.secretStatus()])
-      .then(([metadataValue, configValue, secretValue]) => {
+    Promise.all([api.metadata(), api.config(), api.secretStatus(), api.reportHistory()])
+      .then(([metadataValue, configValue, secretValue, historyValue]) => {
         setMetadata({ ...emptyMetadata, ...metadataValue });
         setConfig(configValue);
         setSecretStatus(secretValue);
+        setHistory(historyValue.items);
       })
       .catch((err) => setError(err.message));
   }, []);
@@ -352,6 +364,7 @@ function App() {
     setError(null);
     setEvents([]);
     setReports(null);
+    setSelectedHistoryId(null);
     try {
       await api.saveConfig(config);
       const run = await api.createRun(config);
@@ -378,6 +391,7 @@ function App() {
             setRunning(false);
             source.close();
             api.reports(runId).then(setReports).catch(() => undefined);
+            api.reportHistory().then((value) => setHistory(value.items)).catch(() => undefined);
           }
         });
       }
@@ -389,6 +403,24 @@ function App() {
       source.close();
       setRunning(false);
     };
+  }
+
+  async function loadHistoricalReport(runId: string) {
+    setError(null);
+    try {
+      const archive = await api.historicalReport(runId);
+      setReports({
+        runId: archive.run.id,
+        reports: archive.reports,
+        finalReport: archive.finalReport,
+        decision: archive.decision,
+      });
+      setActiveRun(archive.run);
+      setSelectedHistoryId(runId);
+      setReportTab('finalReport');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   if (!config) {
@@ -723,6 +755,28 @@ function App() {
         </section>
 
         <aside className="right-rail">
+          <Panel title={t.reportHistory} icon={<History size={17} />}>
+            <div className="history-list">
+              {history.map((item) => (
+                <button
+                  key={item.runId}
+                  className={selectedHistoryId === item.runId ? 'history-row active' : 'history-row'}
+                  onClick={() => loadHistoricalReport(item.runId)}
+                >
+                  <span>
+                    <strong>{item.ticker}</strong>
+                    <small>{item.analysisDate}</small>
+                  </span>
+                  <span>
+                    <small>{item.provider}</small>
+                    <em>{item.decision ?? statusLabel(item.status, locale)}</em>
+                  </span>
+                </button>
+              ))}
+              {history.length === 0 && <span className="empty">{t.historyEmpty}</span>}
+            </div>
+          </Panel>
+
           <Panel title={t.eventStream} icon={<TerminalSquare size={17} />}>
             <div className="event-list">
               {[...events].reverse().slice(0, 30).map((event) => (
@@ -736,6 +790,14 @@ function App() {
           </Panel>
 
           <Panel title={t.reports} icon={<Server size={17} />}>
+            {reports && (
+              <div className="report-context">
+                <strong>
+                  {activeRun?.ticker ?? reports.runId.slice(0, 8)} · {activeRun?.analysisDate ?? reports.runId.slice(0, 8)}
+                </strong>
+                <span>{selectedHistoryId ? t.archivedReport : t.currentReport}</span>
+              </div>
+            )}
             <div className="tabs">
               <button className={reportTab === 'finalReport' ? 'active' : ''} onClick={() => setReportTab('finalReport')}>
                 {t.final}

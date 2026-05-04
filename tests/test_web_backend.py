@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+import web.backend.app as app_module
 from web.backend.app import app
 from web.backend.constants import CUSTOM_DATA_VENDOR, CUSTOM_OPENAI_PROVIDER, metadata_payload
 from web.backend.custom_data import configure_custom_data_interfaces
 from web.backend.runner import RunManager
-from web.backend.schemas import RunRequest, WebConfig
+from web.backend.schemas import RunInfo, RunReports, RunRequest, WebConfig
 from web.backend.storage import WebStorage, mask_secret
 
 
@@ -45,6 +46,40 @@ def test_storage_masks_and_never_returns_plain_secret(tmp_path):
     assert status["OPENAI_API_KEY"].configured is True
     assert status["OPENAI_API_KEY"].masked == "sk-t...6789"
     assert mask_secret("short") == "sh...t"
+
+
+def test_storage_persists_report_history(tmp_path):
+    storage = WebStorage(tmp_path)
+    config = WebConfig(ticker="SPY", analysisDate=date.today(), analysts=["market"], outputLanguage="Chinese")
+    run = RunInfo(
+        id="11111111-1111-4111-8111-111111111111",
+        status="succeeded",
+        ticker="SPY",
+        analysisDate=date.today(),
+        submittedAt=datetime(2026, 5, 1, 8, 0, tzinfo=timezone.utc),
+        endedAt=datetime(2026, 5, 1, 8, 5, tzinfo=timezone.utc),
+        decision="BUY",
+        stats={"llm_calls": 3},
+    )
+    reports = RunReports(
+        runId=run.id,
+        reports={"market_report": "Market report"},
+        finalReport="# Trading Analysis Report: SPY",
+        decision="BUY",
+    )
+
+    archive = storage.save_report_history(run, config, reports)
+    loaded = storage.load_report_history(run.id)
+    history = storage.list_report_history()
+
+    assert archive.schema_version == 1
+    assert loaded is not None
+    assert loaded.final_report == "# Trading Analysis Report: SPY"
+    assert loaded.config.output_language == "Chinese"
+    assert history.items[0].run_id == run.id
+    assert history.items[0].provider == config.llm_provider
+    assert history.items[0].decision == "BUY"
+    assert storage.load_report_history("../not-a-run") is None
 
 
 def test_custom_openai_requires_base_url_and_accepts_model_ids():
@@ -174,6 +209,34 @@ def test_health_and_metadata_endpoints():
     assert client.get("/api/metadata").status_code == 200
 
 
+def test_report_history_endpoints(monkeypatch, tmp_path):
+    storage = WebStorage(tmp_path)
+    config = WebConfig(ticker="SPY", analysisDate=date.today(), analysts=["market"])
+    run = RunInfo(
+        id="22222222-2222-4222-8222-222222222222",
+        status="succeeded",
+        ticker="SPY",
+        analysisDate=date.today(),
+        submittedAt=datetime(2026, 5, 1, 8, 0, tzinfo=timezone.utc),
+        endedAt=datetime(2026, 5, 1, 8, 5, tzinfo=timezone.utc),
+        decision="BUY",
+    )
+    storage.save_report_history(
+        run,
+        config,
+        RunReports(runId=run.id, reports={"market_report": "Market report"}, finalReport="Final", decision="BUY"),
+    )
+    monkeypatch.setattr(app_module, "storage", storage)
+    client = TestClient(app)
+
+    list_payload = client.get("/api/reports/history").json()
+    detail_payload = client.get(f"/api/reports/history/{run.id}").json()
+
+    assert list_payload["items"][0]["runId"] == run.id
+    assert detail_payload["finalReport"] == "Final"
+    assert client.get("/api/reports/history/not-a-uuid").status_code == 404
+
+
 def test_run_manager_completes_with_mock_graph(monkeypatch, tmp_path):
     class FakePropagator:
         def create_initial_state(self, ticker, trade_date):
@@ -249,3 +312,7 @@ def test_run_manager_completes_with_mock_graph(monkeypatch, tmp_path):
     assert run.decision == "BUY"
     assert run.reports["market_report"] == "Market report"
     assert run.final_report and "Trading Analysis Report" in run.final_report
+
+    history = storage.list_report_history()
+    assert history.items[0].run_id == run.id
+    assert storage.load_report_history(run.id) is not None

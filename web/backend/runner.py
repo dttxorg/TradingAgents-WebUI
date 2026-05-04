@@ -233,6 +233,7 @@ class RunManager:
             run.stats = stats_handler.get_stats()
             run.status = "succeeded"
             run.ended_at = utc_now()
+            self.storage.save_report_history(run.info(), run.config, run.report_payload())
             run.emit(
                 "status",
                 {

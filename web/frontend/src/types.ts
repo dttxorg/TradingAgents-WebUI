@@ -70,3 +70,33 @@ export type ReportsPayload = {
   finalReport?: string | null;
   decision?: string | null;
 };
+
+export type ReportHistoryItem = {
+  runId: string;
+  ticker: string;
+  analysisDate: string;
+  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  submittedAt: string;
+  endedAt?: string | null;
+  decision?: string | null;
+  provider: string;
+  outputLanguage: string;
+  analysts: string[];
+  researchDepth: number;
+  stats: Record<string, number>;
+  archivedAt: string;
+};
+
+export type ReportHistoryList = {
+  items: ReportHistoryItem[];
+};
+
+export type HistoricalReport = {
+  schemaVersion: number;
+  archivedAt: string;
+  run: RunInfo;
+  config: WebConfig;
+  reports: Record<string, unknown>;
+  finalReport?: string | null;
+  decision?: string | null;
+};
