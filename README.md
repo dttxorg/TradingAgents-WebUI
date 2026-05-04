@@ -24,8 +24,9 @@ instead of being hard-coded in the React app.
 - Queued single-run execution with Server-Sent Events for live progress
 - Active run recovery after browser refresh, plus stop/cancel controls for
   queued and running analyses
-- Ordered batch analysis for multiple tickers, with configurable parallel stock
-  workers
+- Ordered batch analysis for multiple tickers. List submissions run strictly one
+  ticker after another; the parallel worker setting only applies to separately
+  submitted single-stock jobs.
 - Report tabs for agent output, final report, stats, and decision
 - Persistent report history for reviewing prior runs and preparing future
   backtesting workflows
@@ -51,6 +52,24 @@ docker compose up --build web
 ```
 
 Open `http://localhost:8000`.
+
+### Quick Upgrade
+
+If the server deploys from GitHub, the short upgrade command is:
+
+```bash
+make upgrade
+```
+
+It runs `git pull --ff-only` and rebuilds/restarts the `web` service with a
+stable Compose project name, while keeping the Docker volume data.
+
+If `make` is not installed, use the equivalent commands:
+
+```bash
+git pull --ff-only
+docker compose -p tradingagents-webui up -d --build web
+```
 
 ### Local Development
 
@@ -159,10 +178,11 @@ The response may be plain text, JSON, or JSON with a top-level `data` field.
 ### Parallelism and Backtest Observation
 
 The current upstream TradingAgents graph runs the analyst nodes in a fixed
-sequence, then runs research debate, trader, and risk debate in order. The safest
-parallelism in this WebUI is therefore multiple stock runs at once. Set
-`Parallel stock runs` to 2-8 to let the backend process several tickers
-concurrently.
+sequence, then runs research debate, trader, and risk debate in order. To avoid
+duplicate background analyses blocking the queue after refreshes or repeated
+submissions, ticker-list runs are serialized: the next ticker is enqueued only
+after the previous ticker finishes, fails, or is cancelled. The parallel worker
+setting is reserved for separately submitted single-stock jobs.
 
 The Settings page also exposes per-agent LLM routes. The four initial analysts
 are marked as parallel-ready for future graph fan-out; debate, trader, and risk
@@ -207,7 +227,8 @@ TradingAgents-WebUI 是一个面向
 - API Key 只支持写入和掩码状态展示，不会向浏览器返回明文密钥
 - 单任务队列执行，并通过 Server-Sent Events 实时展示运行进度
 - 浏览器刷新后可恢复正在排队/运行中的工作流，并支持停止排队或运行中的分析
-- 支持多股票按列表提交，并可配置股票任务并行 worker 数
+- 支持多股票按列表提交。列表任务会严格按顺序执行；并行 worker 设置只用于单独提交
+  的单股票任务
 - 报告 Tabs 展示智能体输出、最终报告、统计信息和决策结果
 - 持久化历史报告，方便回看历史运行结果，并为后续回测功能准备数据基础
 - 独立回测观察 API：每份报告生成一份持久化复盘记录，支持断点续跑、定时周期、
@@ -229,6 +250,24 @@ docker compose up --build web
 ```
 
 打开 `http://localhost:8000`。
+
+### 快捷升级
+
+如果服务器是从 GitHub 部署，快捷升级口令是：
+
+```bash
+make upgrade
+```
+
+它会执行 `git pull --ff-only`，并用固定的 Compose 项目名重新构建/启动 `web`
+服务，同时保留 Docker volume 里的历史报告、配置和密钥数据。
+
+如果服务器没有安装 `make`，可以使用等价命令：
+
+```bash
+git pull --ff-only
+docker compose -p tradingagents-webui up -d --build web
+```
 
 ### 本地开发
 
@@ -321,8 +360,9 @@ Authorization: Bearer CUSTOM_DATA_API_KEY
 ### 并行与回测观察
 
 当前上游 TradingAgents 图里，分析师节点按固定顺序运行，随后研究辩论、交易员、
-风控辩论也都有上下文依赖。因此 WebUI v1 最稳妥的提速方式是多股票并行运行：
-把 `股票并行数` 设为 2-8 后，后端会用多个 worker 同时处理不同股票。
+风控辩论也都有上下文依赖。为了避免刷新或重复提交导致后台旧任务并发阻塞，按列表提交的
+多股票任务会严格串行：上一只股票完成、失败或取消后，下一只股票才会进入执行队列。
+并行 worker 设置保留给单独提交的单股票任务使用。
 
 Settings 页面还提供按智能体的 LLM 路由。四个初始分析师被标记为“可并行”，方便后续
 做图内 fan-out；辩论、交易员和风控节点保持顺序执行，但仍可分配独立 API Key，

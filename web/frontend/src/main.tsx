@@ -106,7 +106,7 @@ const messages = {
     geminiThinking: 'Gemini thinking',
     anthropicEffort: 'Anthropic effort',
     checkpointResume: 'Checkpoint resume',
-    parallelRuns: 'Parallel stock runs',
+    parallelRuns: 'Single-run workers',
     saveDefaults: 'Save defaults',
     connectionSettings: 'Provider settings',
     allApiKeys: 'API keys',
@@ -294,7 +294,7 @@ const messages = {
     geminiThinking: 'Gemini 思考模式',
     anthropicEffort: 'Anthropic Effort',
     checkpointResume: '启用断点续跑',
-    parallelRuns: '股票并行数',
+    parallelRuns: '单股票任务 worker 数',
     saveDefaults: '保存默认配置',
     connectionSettings: '供应商设置',
     allApiKeys: 'API 密钥',
@@ -2826,7 +2826,7 @@ function buildSetupRecommendations(
   }
 
   if (config.maxParallelRuns > 1 && enabledRoutes.length === 0) {
-    items.push(locale === 'zh' ? '已启用多股票并行；建议为初始分析师配置独立 LLM 路由，避免多个并发任务挤在同一个 API Key 上。' : 'Parallel stock runs are enabled; consider separate analyst LLM routes so concurrent jobs do not share one API key.');
+    items.push(locale === 'zh' ? '已启用多个单股票任务 worker；列表批量提交仍会按顺序执行。如需同时跑多个独立任务，建议为初始分析师配置独立 LLM 路由，避免挤在同一个 API Key 上。' : 'Multiple single-run workers are enabled; ticker-list batches still run in order. For concurrent standalone jobs, consider separate analyst LLM routes so they do not share one API key.');
   }
 
   return items;

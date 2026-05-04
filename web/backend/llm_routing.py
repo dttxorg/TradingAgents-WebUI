@@ -23,11 +23,10 @@ from tradingagents.agents import (
 from tradingagents.llm_clients import create_llm_client
 
 from .constants import (
-    CUSTOM_OPENAI_PROVIDER,
     LLM_ROUTE_TARGETS,
-    OPENAI_COMPATIBLE_ADAPTER_PROVIDERS,
     provider_default_base_url,
     provider_secret_field,
+    uses_openai_compatible_adapter,
 )
 from .schemas import LLMRouteConfig
 
@@ -176,14 +175,14 @@ class LLMRouter:
         provider_secret = self.secrets.get(provider_secret_field(provider) or "")
         api_key = route_secret or provider_secret
 
-        if provider == CUSTOM_OPENAI_PROVIDER or provider in OPENAI_COMPATIBLE_ADAPTER_PROVIDERS:
+        if uses_openai_compatible_adapter(provider, base_url):
             client_provider = "openrouter"
             if not base_url:
                 raise RuntimeError(f"Base URL is required for {ROUTE_META[route_key]['label']} LLM route.")
 
         if provider != "ollama" and api_key:
             kwargs["api_key"] = api_key
-        elif provider != "ollama" and (provider == CUSTOM_OPENAI_PROVIDER or provider in OPENAI_COMPATIBLE_ADAPTER_PROVIDERS):
+        elif provider != "ollama" and uses_openai_compatible_adapter(provider, base_url):
             raise RuntimeError(
                 f"{ROUTE_META[route_key]['apiKeyField']} or {provider_secret_field(provider)} is required for "
                 f"{ROUTE_META[route_key]['label']} LLM route."

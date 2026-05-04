@@ -17,7 +17,7 @@ from web.backend.custom_data import configure_custom_data_interfaces
 from web.backend.markets import format_market_ticker, market_profile_prompt
 from web.backend.model_discovery import fetch_provider_models
 from web.backend.runner import RunManager
-from web.backend.schemas import BacktestPriceBar, BacktestScheduleConfig, ModelFetchRequest, PricingConfig, RechargeRequest, RunInfo, RunReports, RunRequest, WebConfig
+from web.backend.schemas import BatchRunRequest, BacktestPriceBar, BacktestScheduleConfig, ModelFetchRequest, PricingConfig, RechargeRequest, RunInfo, RunReports, RunRequest, WebConfig
 from web.backend.storage import WebStorage, calculate_analysis_cost, mask_secret, usage_from_stats
 
 
@@ -655,6 +655,82 @@ def test_run_manager_rejects_custom_openai_without_secret(tmp_path):
     assert run.error == "CUSTOM_OPENAI_API_KEY is required for custom_openai provider."
 
 
+def test_openai_custom_base_url_uses_compatible_runtime(monkeypatch, tmp_path):
+    captured = {}
+
+    class FakePropagator:
+        def create_initial_state(self, ticker, trade_date):
+            return {"messages": [("human", ticker)], "company_of_interest": ticker, "trade_date": trade_date}
+
+        def get_graph_args(self, callbacks=None):
+            return {}
+
+    class FakeCompiledGraph:
+        def stream(self, state, **kwargs):
+            yield {
+                "messages": [],
+                "company_of_interest": state["company_of_interest"],
+                "trade_date": state["trade_date"],
+                "market_report": "Market report",
+                "investment_debate_state": {"judge_decision": "Research manager decision"},
+                "trader_investment_plan": "Trading plan",
+                "risk_debate_state": {"judge_decision": "Buy"},
+                "final_trade_decision": "Buy",
+            }
+
+    class FakeMemoryLog:
+        def store_decision(self, **kwargs):
+            return None
+
+    class FakeTradingAgentsGraph:
+        def __init__(self, selected_analysts, config, debug, callbacks):
+            captured["runtime_config"] = dict(config)
+            self.propagator = FakePropagator()
+            self.graph = FakeCompiledGraph()
+            self.workflow = self
+            self.memory_log = FakeMemoryLog()
+
+        def compile(self, checkpointer=None):
+            return self.graph
+
+        def process_signal(self, value):
+            return "BUY"
+
+        def _log_state(self, trade_date, final_state):
+            return None
+
+        def _resolve_pending_entries(self, ticker):
+            return None
+
+    monkeypatch.setattr("web.backend.runner.TradingAgentsGraph", FakeTradingAgentsGraph)
+
+    storage = WebStorage(tmp_path)
+    storage.save_secrets({"OPENAI_API_KEY": "test-openai-gateway-key"})
+    manager = RunManager(storage)
+    config = WebConfig(
+        ticker="AAPL",
+        analysisDate=date.today(),
+        analysts=["market"],
+        llmProvider="openai",
+        backendUrl="http://158.101.23.132:8317/v1",
+        quickThinkLlm="gateway-fast",
+        deepThinkLlm="gateway-deep",
+    )
+    run = manager.create_run(RunRequest(ticker="AAPL", analysisDate=date.today(), config=config))
+
+    deadline = time.time() + 2
+    while run.status not in {"succeeded", "failed"} and time.time() < deadline:
+        time.sleep(0.02)
+
+    config_event = next(event for event in run.events if event["type"] == "configuration")
+    assert run.status == "succeeded"
+    assert captured["runtime_config"]["llm_provider"] == "openrouter"
+    assert captured["runtime_config"]["backend_url"] == "http://158.101.23.132:8317/v1"
+    assert config_event["payload"]["provider"] == "openai"
+    assert config_event["payload"]["runtimeProvider"] == "openrouter"
+    assert config_event["payload"]["backendUrl"] == "http://158.101.23.132:8317/v1"
+
+
 def test_health_and_metadata_endpoints():
     client = TestClient(app)
 
@@ -702,6 +778,81 @@ def test_batch_run_endpoint_queues_runs_in_order(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     assert [item["ticker"] for item in payload["runs"]] == ["SPY", "0700.HK"]
+
+
+def test_batch_runs_execute_one_ticker_at_a_time(monkeypatch, tmp_path):
+    started: list[tuple[str, float]] = []
+    ended: list[tuple[str, float]] = []
+
+    class FakePropagator:
+        def create_initial_state(self, ticker, trade_date):
+            return {"messages": [("human", ticker)], "company_of_interest": ticker, "trade_date": trade_date}
+
+        def get_graph_args(self, callbacks=None):
+            return {}
+
+    class FakeCompiledGraph:
+        def stream(self, state, **kwargs):
+            ticker = state["company_of_interest"]
+            started.append((ticker, time.time()))
+            time.sleep(0.15)
+            ended.append((ticker, time.time()))
+            yield {
+                "messages": [],
+                "company_of_interest": ticker,
+                "trade_date": state["trade_date"],
+                "market_report": f"Market report for {ticker}",
+                "investment_debate_state": {"judge_decision": "Research manager decision"},
+                "trader_investment_plan": "Trading plan",
+                "risk_debate_state": {"judge_decision": "Buy"},
+                "final_trade_decision": "Buy",
+            }
+
+    class FakeMemoryLog:
+        def store_decision(self, **kwargs):
+            return None
+
+    class FakeTradingAgentsGraph:
+        def __init__(self, selected_analysts, config, debug, callbacks):
+            self.propagator = FakePropagator()
+            self.graph = FakeCompiledGraph()
+            self.workflow = self
+            self.memory_log = FakeMemoryLog()
+
+        def compile(self, checkpointer=None):
+            return self.graph
+
+        def process_signal(self, value):
+            return "BUY"
+
+        def _log_state(self, trade_date, final_state):
+            return None
+
+        def _resolve_pending_entries(self, ticker):
+            return None
+
+    monkeypatch.setattr("web.backend.runner.TradingAgentsGraph", FakeTradingAgentsGraph)
+
+    storage = WebStorage(tmp_path)
+    manager = RunManager(storage)
+    config = WebConfig(ticker="AAPL", analysisDate=date.today(), analysts=["market"], maxParallelRuns=4)
+    runs = manager.create_batch_runs(BatchRunRequest(tickers=["AAPL", "MSFT"], analysisDate=date.today(), config=config))
+
+    deadline = time.time() + 2
+    while len(started) < 1 and time.time() < deadline:
+        time.sleep(0.01)
+    time.sleep(0.05)
+
+    assert len(started) == 1
+    assert runs[0].status == "running"
+    assert runs[1].status == "queued"
+
+    while any(run.status not in {"succeeded", "failed", "cancelled"} for run in runs) and time.time() < deadline:
+        time.sleep(0.02)
+
+    assert [run.status for run in runs] == ["succeeded", "succeeded"]
+    assert [item[0] for item in started] == [runs[0].request.ticker, runs[1].request.ticker]
+    assert started[1][1] >= ended[0][1]
 
 
 def test_run_list_endpoint_returns_active_runs(monkeypatch, tmp_path):

@@ -24,10 +24,9 @@ from tradingagents.graph.checkpointer import clear_checkpoint, get_checkpointer,
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 
 from .constants import (
-    CUSTOM_OPENAI_PROVIDER,
-    OPENAI_COMPATIBLE_ADAPTER_PROVIDERS,
     provider_default_base_url,
     provider_secret_field,
+    uses_openai_compatible_adapter,
 )
 from .custom_data import configure_custom_data_interfaces
 from .llm_routing import has_enabled_llm_routes, routed_workflow
@@ -138,6 +137,7 @@ class RunRecord:
     reports: dict[str, Any] = field(default_factory=dict)
     final_report: str | None = None
     cancel_requested: bool = False
+    next_run_id: str | None = None
     events: list[dict[str, Any]] = field(default_factory=list)
     event_queue: "queue.Queue[dict[str, Any]]" = field(default_factory=queue.Queue)
     billing_settled: bool = False
@@ -189,6 +189,9 @@ class RunManager:
         self._ensure_worker_count(self.storage.load_config().max_parallel_runs)
 
     def create_run(self, request: RunRequest, user: UserPublic | None = None) -> RunRecord:
+        return self._create_run(request, user=user, enqueue=True)
+
+    def _create_run(self, request: RunRequest, user: UserPublic | None = None, enqueue: bool = True) -> RunRecord:
         config = request.config or self.storage.load_config()
         self._ensure_worker_count(config.max_parallel_runs)
         raw_ticker = request.ticker
@@ -217,7 +220,8 @@ class RunManager:
                 "billing": run.billing.model_dump(mode="json", by_alias=True) if run.billing else None,
             },
         )
-        self.pending.put(run.id)
+        if enqueue:
+            self.pending.put(run.id)
         return run
 
     def create_batch_runs(self, request: BatchRunRequest, user: UserPublic | None = None) -> list[RunRecord]:
@@ -225,17 +229,16 @@ class RunManager:
         if user is not None:
             config = request.config or self.storage.load_config()
             self.storage.ensure_batch_balance(user.id, config, len(request.tickers))
-        for ticker in request.tickers:
+        for index, ticker in enumerate(request.tickers):
             runs.append(
-                self.create_run(
-                    RunRequest(
-                        ticker=ticker,
-                        analysis_date=request.analysis_date,
-                        config=request.config,
-                    ),
+                self._create_run(
+                    RunRequest(ticker=ticker, analysis_date=request.analysis_date, config=request.config),
                     user=user,
+                    enqueue=index == 0,
                 )
             )
+        for current, next_run in zip(runs, runs[1:]):
+            current.next_run_id = next_run.id
         return runs
 
     def get_run(self, run_id: str) -> RunRecord | None:
@@ -296,6 +299,8 @@ class RunManager:
                 run = self.get_run(run_id)
                 if run is not None and run.status != "cancelled":
                     self._execute(run)
+                elif run is not None:
+                    self._enqueue_next_run(run)
             finally:
                 self.pending.task_done()
 
@@ -320,7 +325,7 @@ class RunManager:
             secrets = self.storage.load_secrets()
             self.storage.load_secrets_into_env()
             runtime_config = self.storage.runtime_config(run.config)
-            if run.config.llm_provider == CUSTOM_OPENAI_PROVIDER or run.config.llm_provider in OPENAI_COMPATIBLE_ADAPTER_PROVIDERS:
+            if uses_openai_compatible_adapter(run.config.llm_provider, run.config.backend_url):
                 api_key_field = provider_secret_field(run.config.llm_provider)
                 custom_key = secrets.get(api_key_field) if api_key_field else None
                 if not custom_key:
@@ -385,6 +390,8 @@ class RunManager:
                     "ticker": run.request.ticker,
                     "analysisDate": str(run.request.analysis_date),
                     "provider": run.config.llm_provider,
+                    "runtimeProvider": runtime_config.get("llm_provider"),
+                    "backendUrl": runtime_config.get("backend_url"),
                     "stockMarket": run.config.stock_market,
                     "inputTicker": run.raw_ticker or run.config.ticker,
                     "marketProfile": runtime_config.get("market_profiles", {}).get(run.config.stock_market, {}),
@@ -470,11 +477,12 @@ class RunManager:
         finally:
             if checkpointer_ctx is not None:
                 checkpointer_ctx.__exit__(None, None, None)
-            if run.config.llm_provider == CUSTOM_OPENAI_PROVIDER or run.config.llm_provider in OPENAI_COMPATIBLE_ADAPTER_PROVIDERS:
+            if uses_openai_compatible_adapter(run.config.llm_provider, run.config.backend_url):
                 if original_openrouter_key is None:
                     os.environ.pop("OPENROUTER_API_KEY", None)
                 else:
                     os.environ["OPENROUTER_API_KEY"] = original_openrouter_key
+            self._enqueue_next_run(run)
 
     def _mark_cancelled(self, run: RunRecord) -> None:
         run.status = "cancelled"
@@ -494,6 +502,19 @@ class RunManager:
             return
         run.billing = self.storage.settle_analysis_order(run.order_id, run.config, run.stats, status) or run.billing
         run.billing_settled = True
+
+    def _enqueue_next_run(self, run: RunRecord) -> None:
+        next_run_id = run.next_run_id
+        run.next_run_id = None
+        while next_run_id:
+            next_run = self.get_run(next_run_id)
+            if next_run is None:
+                return
+            if next_run.status == "queued":
+                self.pending.put(next_run.id)
+                return
+            next_run_id = next_run.next_run_id
+            next_run.next_run_id = None
 
     def _process_chunk(
         self,

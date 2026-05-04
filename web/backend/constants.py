@@ -483,6 +483,16 @@ def provider_default_base_url(value: str) -> str | None:
     return provider.get("defaultBaseUrl") if provider else None
 
 
+def uses_openai_compatible_adapter(value: str, base_url: str | None = None) -> bool:
+    provider = value.strip().lower()
+    if provider == CUSTOM_OPENAI_PROVIDER or provider in OPENAI_COMPATIBLE_ADAPTER_PROVIDERS:
+        return True
+    if provider == "openai" and base_url:
+        default_base_url = provider_default_base_url("openai")
+        return base_url.rstrip("/") != (default_base_url or "").rstrip("/")
+    return False
+
+
 def provider_secret_field(value: str) -> str | None:
     provider = provider_by_value(value)
     return provider.get("apiKeyField") if provider else None
