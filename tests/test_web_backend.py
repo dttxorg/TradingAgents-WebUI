@@ -59,6 +59,18 @@ def test_web_config_normalizes_ticker_and_rejects_future_date():
 
 
 def test_market_profiles_format_bare_tickers_and_prompt_context():
+    us_config = WebConfig(ticker="SPY")
+    assert us_config.market_profiles["us"].region == "us"
+    assert format_market_ticker("SPY", us_config) == "SPY.us"
+    assert format_market_ticker("SPY.US", us_config) == "SPY.US"
+
+    old_us_config = WebConfig(
+        ticker="SPY",
+        marketProfiles={"us": {"region": "", "weight": "1", "marketProfile": "Legacy US profile."}},
+    )
+    assert old_us_config.market_profiles["us"].region == "us"
+    assert format_market_ticker("SPY", old_us_config) == "SPY.us"
+
     config = WebConfig(
         ticker="0700",
         stockMarket="hk",
@@ -365,7 +377,7 @@ def test_backtest_custom_price_api_is_dedicated_and_checkpointed(monkeypatch, tm
             "json": {
                 "ticker": "SPY",
                 "start": "2026-05-01",
-                "end": "2026-05-04",
+                "end": str(date.today()),
                 "interval": "1d",
                 "purpose": "backtest_observation",
             },

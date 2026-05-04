@@ -312,6 +312,8 @@ class WebConfig(APIModel):
             if market not in STOCK_MARKET_KEYS:
                 raise ValueError(f"Unsupported market profile: {key}")
             profiles[market] = profile
+        if profiles["us"].region == "":
+            profiles["us"] = profiles["us"].model_copy(update={"region": "us"})
         return profiles
 
     @model_validator(mode="after")

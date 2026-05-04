@@ -59,7 +59,7 @@ STOCK_MARKETS = [
     {
         "key": "us",
         "label": "US stocks",
-        "description": "US-listed equities and ETFs. Leave region empty for yfinance-style symbols, or set your own suffix such as us.",
+        "description": "US-listed equities and ETFs. Bare symbols are wrapped with the configured region suffix, defaulting to us.",
     },
     {
         "key": "hk",
@@ -80,7 +80,7 @@ STOCK_MARKETS = [
 
 DEFAULT_MARKET_PROFILES = {
     "us": {
-        "region": "",
+        "region": "us",
         "weight": "1",
         "marketProfile": "US equities / ETFs. Emphasize USD pricing, US exchange hours, SEC filings, Fed policy, sector rotation, and US macro context.",
     },
