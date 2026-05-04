@@ -60,6 +60,35 @@ button:disabled {
   }
 }
 
+@keyframes soft-pulse {
+  0%, 100% {
+    opacity: 0.55;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes flow-scan {
+  0% {
+    transform: translateX(-45%);
+  }
+  100% {
+    transform: translateX(145%);
+  }
+}
+
+@keyframes fill-glow {
+  0%, 100% {
+    filter: brightness(0.95);
+  }
+  50% {
+    filter: brightness(1.18);
+  }
+}
+
 .app-shell {
   width: min(1800px, 100%);
   margin: 0 auto;
@@ -156,6 +185,7 @@ h2 {
 .run-pill.running {
   color: #79d5ff;
   border-color: #225b76;
+  animation: fill-glow 1.8s ease-in-out infinite;
 }
 
 .run-pill.succeeded {
@@ -230,6 +260,151 @@ h2 {
   grid-template-columns: minmax(0, 1fr) 440px;
 }
 
+.workspace-overview {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(260px, 1.35fr) repeat(3, minmax(150px, 0.55fr)) minmax(260px, 1fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.overview-card,
+.overview-progress {
+  border: 1px solid #203035;
+  background: rgba(14, 21, 24, 0.94);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.flow-card {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(180px, 1.2fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.flow-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(110deg, transparent 0%, rgba(121, 213, 255, 0.12) 45%, transparent 70%);
+  transform: translateX(-45%);
+  animation: flow-scan 5s linear infinite;
+}
+
+.overview-card span,
+.overview-progress span {
+  display: block;
+  color: #819194;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.overview-card strong {
+  display: block;
+  margin-top: 4px;
+  color: #eef5f4;
+  font-size: 22px;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-line {
+  position: relative;
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.flow-line::before {
+  content: "";
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  top: 50%;
+  height: 2px;
+  background: linear-gradient(90deg, #83e4b9, #79d5ff, #e5c45a);
+  opacity: 0.55;
+}
+
+.flow-line i {
+  position: relative;
+  z-index: 1;
+  width: 14px;
+  height: 14px;
+  margin: 0 auto;
+  border-radius: 50%;
+  border: 2px solid #79d5ff;
+  background: #0c1215;
+  box-shadow: 0 0 0 5px rgba(121, 213, 255, 0.08);
+  animation: soft-pulse 1.8s ease-in-out infinite;
+}
+
+.flow-line i:nth-child(2) {
+  animation-delay: 180ms;
+  border-color: #83e4b9;
+}
+
+.flow-line i:nth-child(3) {
+  animation-delay: 360ms;
+  border-color: #e5c45a;
+}
+
+.flow-line i:nth-child(4) {
+  animation-delay: 540ms;
+  border-color: #d0a6ff;
+}
+
+.flow-line.idle i,
+.flow-line.succeeded i,
+.flow-line.failed i,
+.flow-line.cancelled i {
+  animation: none;
+}
+
+.overview-progress {
+  display: grid;
+  align-content: center;
+  gap: 9px;
+}
+
+.overview-progress > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.overview-progress small {
+  color: #83e4b9;
+  font-size: 12px;
+  font-weight: 740;
+  text-align: right;
+}
+
+.estimate-bar {
+  height: 8px;
+  overflow: hidden;
+  border: 1px solid #25373c;
+  background: #0c1215;
+  border-radius: 999px;
+}
+
+.estimate-bar span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #83e4b9, #79d5ff, #e5c45a);
+  transition: width 500ms ease;
+}
+
 .settings-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 420px;
@@ -251,6 +426,12 @@ h2 {
   background: rgba(14, 21, 24, 0.94);
   border-radius: 8px;
   padding: 14px;
+  transition: border-color 180ms ease, transform 180ms ease, background 180ms ease;
+}
+
+.panel:hover {
+  border-color: #2f464d;
+  transform: translateY(-1px);
 }
 
 .panel-header {
@@ -356,6 +537,10 @@ textarea {
 
 .settings-model-row {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 150px;
+}
+
+.settings-language-grid {
+  margin-bottom: 14px;
 }
 
 .model-fetch-button {
@@ -683,6 +868,17 @@ textarea {
   font-size: 18px;
 }
 
+.timeline-estimate {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  color: #8fa0a2;
+  font-size: 12px;
+  font-weight: 720;
+}
+
 .event-list {
   display: grid;
   gap: 8px;
@@ -917,6 +1113,10 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .workspace-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .right-rail {
     grid-column: 1 / -1;
     grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
@@ -943,17 +1143,31 @@ textarea {
   .advanced-grid,
   .tool-row,
   .settings-form,
-    .settings-model-row,
-    .agent-grid,
-    .metrics-row,
-    .endpoint-grid,
-    .batch-list,
-    .route-fields,
-    .observation-grid {
+  .settings-model-row,
+  .agent-grid,
+  .metrics-row,
+  .endpoint-grid,
+  .batch-list,
+  .route-fields,
+  .observation-grid,
+  .workspace-overview,
+  .flow-card,
+  .timeline-estimate {
     grid-template-columns: 1fr;
   }
 
   .ticker-list-field {
     grid-column: span 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
   }
 }

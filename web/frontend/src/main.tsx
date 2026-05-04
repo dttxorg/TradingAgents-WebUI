@@ -41,6 +41,13 @@ const messages = {
     stopAnalysis: 'Stop analysis',
     workspace: 'Workspace',
     settings: 'Settings',
+    activeWorkflow: 'Active workflow',
+    configuredAgents: 'Configured agents',
+    dataRouteCount: 'Data routes',
+    estimateTotal: 'Estimated total',
+    estimateRemaining: 'Remaining',
+    estimateWaiting: 'Waiting for first checkpoint',
+    estimateConfidence: 'confidence',
     connections: 'Settings / API keys',
     notConfigured: 'Not configured',
     replaceValue: 'Replace value',
@@ -140,6 +147,13 @@ const messages = {
     stopAnalysis: '停止分析',
     workspace: '工作台',
     settings: '设置',
+    activeWorkflow: '当前工作流',
+    configuredAgents: '已配置智能体',
+    dataRouteCount: '数据路由',
+    estimateTotal: '预计总耗时',
+    estimateRemaining: '剩余时间',
+    estimateWaiting: '等待首个检查点',
+    estimateConfidence: '可信度',
     connections: '设置 / API 密钥',
     notConfigured: '未配置',
     replaceValue: '替换当前值',
@@ -720,6 +734,9 @@ function App() {
     | { agents?: Record<string, string>; stats?: Record<string, number>; elapsedSeconds?: number }
     | undefined;
   const agentStatus = progress?.agents ?? {};
+  const timeEstimate = estimateRunTime(events, agentStatus, progress, activeRun, locale);
+  const configuredTickerCount = parseTickerList(tickerList || config.ticker).length || 1;
+  const customRouteCount = Object.keys(config.toolVendors ?? {}).length + Object.values(config.llmRoutes ?? {}).filter((route) => route.enabled).length;
   const displayedReports: ReportsPayload | null =
     selectedHistoryId && viewedArchive
       ? {
@@ -851,6 +868,28 @@ function App() {
               {discoveredModels[config.llmProvider]?.length > 0 && (
                 <p className="hint">{discoveredModels[config.llmProvider].length} {t.fetchedModels}</p>
               )}
+
+              <div className="section-title">
+                <Languages size={16} />
+                {t.outputLanguage}
+              </div>
+              <div className="chip-grid settings-language-grid">
+                {metadata.languages.map((language) => (
+                  <button
+                    key={language.value}
+                    className={config.outputLanguage === language.value ? 'chip active' : 'chip'}
+                    onClick={() => updateConfig('outputLanguage', language.value)}
+                  >
+                    {language.label}
+                  </button>
+                ))}
+                <input
+                  className="chip-input"
+                  placeholder={t.customLanguage}
+                  value={customLanguage}
+                  onChange={(event) => updateConfig('outputLanguage', event.target.value)}
+                />
+              </div>
 
               <div className="actions-row">
                 <button className="secondary" onClick={saveSecrets} disabled={isSaving}>
@@ -1071,6 +1110,34 @@ function App() {
         </section>
       ) : (
         <section className="workspace-grid workspace-view">
+        <section className="workspace-overview">
+          <div className="overview-card flow-card">
+            <div>
+              <span>{t.activeWorkflow}</span>
+              <strong>{activeRun?.ticker ?? parseTickerList(tickerList || config.ticker)[0] ?? config.ticker}</strong>
+            </div>
+            <div className={`flow-line ${activeRun?.status ?? 'idle'}`}>
+              <i />
+              <i />
+              <i />
+              <i />
+            </div>
+          </div>
+          <Metric label={t.configuredAgents} value={`${config.analysts.length} / ${metadata.analysts.length || 4}`} />
+          <Metric label={t.dataRouteCount} value={customRouteCount} />
+          <Metric label={t.estimateTotal} value={timeEstimate.totalSeconds ? formatDuration(timeEstimate.totalSeconds, locale) : t.estimateWaiting} />
+          <Metric label={t.estimateRemaining} value={timeEstimate.remainingSeconds != null ? formatDuration(timeEstimate.remainingSeconds, locale) : '-'} />
+          <div className="overview-progress">
+            <div>
+              <span>{configuredTickerCount > 1 ? `${configuredTickerCount} tickers` : config.outputLanguage}</span>
+              <small>{timeEstimate.confidence ? `${timeEstimate.confidence} ${t.estimateConfidence}` : t.estimateWaiting}</small>
+            </div>
+            <div className="estimate-bar" aria-hidden="true">
+              <span style={{ width: `${timeEstimate.percent}%` }} />
+            </div>
+          </div>
+        </section>
+
         <section className="main-column">
           <Panel title={t.analysisSetup} icon={<Settings2 size={17} />}>
             <div className="form-grid">
@@ -1147,28 +1214,6 @@ function App() {
                 value={String(config.researchDepth)}
                 options={metadata.researchDepths.map((item) => ({ label: researchDepthLabel(Number(item.value), item.label, locale), value: String(item.value) }))}
                 onChange={(value) => updateConfig('researchDepth', Number(value) as 1 | 3 | 5)}
-              />
-            </div>
-
-            <div className="section-title">
-              <Languages size={16} />
-              {t.outputLanguage}
-            </div>
-            <div className="chip-grid">
-              {metadata.languages.map((language) => (
-                <button
-                  key={language.value}
-                  className={config.outputLanguage === language.value ? 'chip active' : 'chip'}
-                  onClick={() => updateConfig('outputLanguage', language.value)}
-                >
-                  {language.label}
-                </button>
-              ))}
-              <input
-                className="chip-input"
-                placeholder={t.customLanguage}
-                value={customLanguage}
-                onChange={(event) => updateConfig('outputLanguage', event.target.value)}
               />
             </div>
 
@@ -1275,7 +1320,16 @@ function App() {
               <Metric label={t.llmCalls} value={progress?.stats?.llm_calls ?? activeRun?.stats?.llm_calls ?? 0} />
               <Metric label={t.toolCalls} value={progress?.stats?.tool_calls ?? activeRun?.stats?.tool_calls ?? 0} />
               <Metric label={t.elapsed} value={`${progress?.elapsedSeconds ?? 0}s`} />
-              <Metric label={t.runId} value={activeRun?.id.slice(0, 8) ?? '-'} />
+              <Metric label={t.estimateTotal} value={timeEstimate.totalSeconds ? formatDuration(timeEstimate.totalSeconds, outputLocale) : t.estimateWaiting} />
+            </div>
+            <div className="timeline-estimate">
+              <div className="estimate-bar" aria-hidden="true">
+                <span style={{ width: `${timeEstimate.percent}%` }} />
+              </div>
+              <span>
+                {t.estimateRemaining}: {timeEstimate.remainingSeconds != null ? formatDuration(timeEstimate.remainingSeconds, outputLocale) : '-'}
+                {timeEstimate.confidence ? ` · ${timeEstimate.confidence} ${t.estimateConfidence}` : ''}
+              </span>
             </div>
           </Panel>
 
@@ -1408,6 +1462,77 @@ function Metric({ label, value }: { label: string; value: string | number }) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+type TimeEstimate = {
+  totalSeconds: number | null;
+  remainingSeconds: number | null;
+  percent: number;
+  confidence: string | null;
+};
+
+function estimateRunTime(
+  events: RunEvent[],
+  agentStatus: Record<string, string>,
+  progress: { elapsedSeconds?: number } | undefined,
+  activeRun: RunInfo | null,
+  locale: Locale,
+): TimeEstimate {
+  const statusValues = Object.values(agentStatus);
+  const totalAgents = statusValues.length;
+  const completed = statusValues.filter((status) => status === 'completed').length;
+  const isDone = activeRun?.status === 'succeeded' || activeRun?.status === 'failed' || activeRun?.status === 'cancelled';
+  const elapsedSeconds = Math.max(0, Math.round(progress?.elapsedSeconds ?? elapsedFromRun(events, activeRun)));
+
+  if (!activeRun || elapsedSeconds === 0) {
+    return { totalSeconds: null, remainingSeconds: null, percent: 0, confidence: null };
+  }
+  if (isDone) {
+    return { totalSeconds: elapsedSeconds, remainingSeconds: 0, percent: 100, confidence: confidenceLabel('high', locale) };
+  }
+  if (totalAgents === 0) {
+    return { totalSeconds: null, remainingSeconds: null, percent: 8, confidence: null };
+  }
+
+  const progressUnits = completed > 0 ? completed : statusValues.some((status) => status === 'in_progress') ? 0.45 : 0;
+  if (progressUnits === 0) {
+    return { totalSeconds: null, remainingSeconds: null, percent: 5, confidence: null };
+  }
+
+  const totalSeconds = Math.max(elapsedSeconds, Math.round((elapsedSeconds / progressUnits) * totalAgents));
+  const remainingSeconds = Math.max(0, totalSeconds - elapsedSeconds);
+  const percent = Math.max(6, Math.min(96, Math.round((elapsedSeconds / totalSeconds) * 100)));
+  const confidence =
+    completed >= Math.max(3, Math.ceil(totalAgents * 0.5))
+      ? confidenceLabel('high', locale)
+      : completed >= 1
+        ? confidenceLabel('medium', locale)
+        : confidenceLabel('low', locale);
+  return { totalSeconds, remainingSeconds, percent, confidence };
+}
+
+function elapsedFromRun(events: RunEvent[], activeRun: RunInfo | null) {
+  const latestEvent = events.at(-1);
+  const endTime = latestEvent ? Date.parse(latestEvent.timestamp) : Date.now();
+  const startTime = activeRun?.startedAt ? Date.parse(activeRun.startedAt) : activeRun?.submittedAt ? Date.parse(activeRun.submittedAt) : endTime;
+  if (!Number.isFinite(endTime) || !Number.isFinite(startTime)) return 0;
+  return Math.max(0, (endTime - startTime) / 1000);
+}
+
+function formatDuration(seconds: number, locale: Locale) {
+  const total = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(total / 60);
+  const remainingSeconds = total % 60;
+  if (minutes <= 0) return locale === 'zh' ? `${remainingSeconds}秒` : `${remainingSeconds}s`;
+  if (remainingSeconds === 0) return locale === 'zh' ? `${minutes}分` : `${minutes}m`;
+  return locale === 'zh' ? `${minutes}分${remainingSeconds}秒` : `${minutes}m ${remainingSeconds}s`;
+}
+
+function confidenceLabel(value: 'low' | 'medium' | 'high', locale: Locale) {
+  if (locale === 'zh') {
+    return value === 'high' ? '高' : value === 'medium' ? '中' : '低';
+  }
+  return value;
 }
 
 type BacktestObservation = {
