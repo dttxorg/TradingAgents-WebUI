@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "A Docker-ready React/FastAPI WebUI for TradingAgents."
 readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
 dependencies = [
     "fastapi>=0.115.0",
     "python-dotenv>=1.0.1",

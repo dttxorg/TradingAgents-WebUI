@@ -154,7 +154,7 @@ gateway or provider-side proxy instead.
 
 ### License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE).
+This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
 
 ## 中文
 
@@ -288,4 +288,4 @@ OpenAI-compatible 网关或供应商侧代理。
 
 ### 开源协议
 
-本项目使用 MIT 协议开源。详见 [LICENSE](LICENSE)。
+本项目使用 Apache License 2.0 协议开源。详见 [LICENSE](LICENSE)。
