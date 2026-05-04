@@ -15,7 +15,7 @@ from requests import RequestException
 from .constants import metadata_payload
 from .model_discovery import fetch_provider_models
 from .runner import RunManager
-from .schemas import ModelFetchRequest, RunRequest, SecretsUpdate, WebConfig
+from .schemas import BatchRunRequest, BatchRunResponse, ModelFetchRequest, RunListResponse, RunRequest, SecretsUpdate, WebConfig
 from .storage import WebStorage
 
 
@@ -82,6 +82,26 @@ def create_run(request: RunRequest) -> dict:
     return run.info().model_dump(mode="json", by_alias=True)
 
 
+@app.post("/api/runs/batch")
+def create_batch_runs(request: BatchRunRequest) -> dict:
+    runs = run_manager.create_batch_runs(request)
+    return BatchRunResponse(runs=[run.info() for run in runs]).model_dump(mode="json", by_alias=True)
+
+
+@app.get("/api/runs")
+def list_runs(active_only: bool = Query(default=False, alias="activeOnly"), limit: int = Query(default=100, ge=1, le=200)) -> dict:
+    runs = run_manager.list_runs(active_only=active_only, limit=limit)
+    return RunListResponse(runs=[run.info() for run in runs]).model_dump(mode="json", by_alias=True)
+
+
+@app.post("/api/runs/{run_id}/cancel")
+def cancel_run(run_id: str) -> dict:
+    run = run_manager.cancel_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    return run.info().model_dump(mode="json", by_alias=True)
+
+
 @app.get("/api/runs/{run_id}")
 def get_run(run_id: str) -> dict:
     run = run_manager.get_run(run_id)
@@ -124,7 +144,7 @@ async def get_run_events(run_id: str) -> StreamingResponse:
                 event = run.events[cursor]
                 cursor += 1
                 yield f"event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
-            if run.status in {"succeeded", "failed"}:
+            if run.status in {"succeeded", "failed", "cancelled"}:
                 break
             try:
                 event = await asyncio.to_thread(run.event_queue.get, True, 2)

@@ -63,15 +63,21 @@ class WebStorage:
         return config
 
     def load_secrets(self) -> dict[str, str]:
+        secrets = {
+            key: value
+            for key in SECRET_FIELDS
+            if isinstance((value := os.environ.get(key)), str) and value
+        }
         if not self.secrets_path.exists():
-            return {}
+            return secrets
         with self.secrets_path.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
-        return {
+        secrets.update({
             key: value
             for key, value in data.items()
             if key in SECRET_FIELDS and isinstance(value, str) and value
-        }
+        })
+        return secrets
 
     def save_secrets(self, updates: dict[str, str | None]) -> dict[str, SecretFieldStatus]:
         secrets = self.load_secrets()
@@ -176,6 +182,11 @@ class WebStorage:
     def runtime_config(self, web_config: WebConfig) -> dict[str, Any]:
         config = dict(DEFAULT_CONFIG)
         config["data_vendors"] = dict(web_config.data_vendors)
+        config["tool_vendors"] = dict(web_config.tool_vendors)
+        config["llm_routes"] = {
+            key: value.model_dump(mode="json", by_alias=True)
+            for key, value in web_config.llm_routes.items()
+        }
         config["custom_data_interfaces"] = {
             key: value.model_dump(mode="json", by_alias=True)
             for key, value in web_config.custom_data_interfaces.items()
@@ -192,4 +203,5 @@ class WebStorage:
         config["output_language"] = web_config.output_language
         config["checkpoint_enabled"] = web_config.checkpoint_enabled
         config["max_recur_limit"] = web_config.max_recur_limit
+        config["max_parallel_runs"] = web_config.max_parallel_runs
         return config

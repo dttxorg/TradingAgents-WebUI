@@ -1,4 +1,4 @@
-import type { HistoricalReport, Metadata, ModelFetchResponse, ReportHistoryList, ReportsPayload, RunInfo, SecretStatus, WebConfig } from './types';
+import type { BatchRunResponse, HistoricalReport, Metadata, ModelFetchResponse, ReportHistoryList, ReportsPayload, RunInfo, RunListResponse, SecretStatus, WebConfig } from './types';
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -32,7 +32,21 @@ export const api = {
         config,
       }),
     }),
+  createBatchRuns: (tickers: string[], config: WebConfig) =>
+    request<BatchRunResponse>('/api/runs/batch', {
+      method: 'POST',
+      body: JSON.stringify({
+        tickers,
+        analysisDate: config.analysisDate,
+        config,
+      }),
+    }),
   run: (id: string) => request<RunInfo>(`/api/runs/${id}`),
+  runs: (activeOnly = false) => request<RunListResponse>(`/api/runs?activeOnly=${activeOnly ? 'true' : 'false'}`),
+  cancelRun: (id: string) =>
+    request<RunInfo>(`/api/runs/${id}/cancel`, {
+      method: 'POST',
+    }),
   reports: (id: string) => request<ReportsPayload>(`/api/runs/${id}/reports`),
   reportHistory: (limit = 50) => request<ReportHistoryList>(`/api/reports/history?limit=${limit}`),
   historicalReport: (id: string) => request<HistoricalReport>(`/api/reports/history/${encodeURIComponent(id)}`),

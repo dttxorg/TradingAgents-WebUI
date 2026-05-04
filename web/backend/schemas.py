@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from cli.utils import normalize_ticker_symbol
 from tradingagents.default_config import DEFAULT_CONFIG
 
-from .constants import CUSTOM_DATA_METHODS, CUSTOM_DATA_VENDOR, CUSTOM_OPENAI_PROVIDER, DATA_VENDOR_CATEGORIES, PROVIDERS, analyst_options
+from .constants import CUSTOM_DATA_METHODS, CUSTOM_DATA_VENDOR, CUSTOM_OPENAI_PROVIDER, DATA_VENDOR_CATEGORIES, LLM_ROUTE_TARGETS, PROVIDERS, analyst_options
 
 
 def to_camel(value: str) -> str:
@@ -52,6 +52,11 @@ CUSTOM_METHODS_BY_CATEGORY = {
     category: {method["method"] for method in CUSTOM_DATA_METHODS if method["category"] == category}
     for category in ALLOWED_VENDOR_KEYS
 }
+CUSTOM_METHOD_CATEGORIES = {
+    method["method"]: method["category"]
+    for method in CUSTOM_DATA_METHODS
+}
+LLM_ROUTE_KEYS = {item["key"] for item in LLM_ROUTE_TARGETS}
 
 
 class CustomDataInterfaceConfig(APIModel):
@@ -80,6 +85,41 @@ class CustomDataInterfaceConfig(APIModel):
         return endpoints
 
 
+class LLMRouteConfig(APIModel):
+    enabled: bool = False
+    provider: str | None = None
+    backend_url: str | None = None
+    model_id: str | None = None
+
+    @field_validator("provider")
+    @classmethod
+    def validate_provider(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        provider = value.strip().lower()
+        if not provider:
+            return None
+        if provider not in ALLOWED_PROVIDERS:
+            raise ValueError(f"Unsupported LLM provider: {value}")
+        return provider
+
+    @field_validator("backend_url")
+    @classmethod
+    def validate_backend_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip().rstrip("/")
+        return cleaned or None
+
+    @field_validator("model_id")
+    @classmethod
+    def validate_model_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
 class WebConfig(APIModel):
     ticker: str = "SPY"
     analysis_date: date = Field(default_factory=date.today)
@@ -95,7 +135,10 @@ class WebConfig(APIModel):
     anthropic_effort: str | None = DEFAULT_CONFIG.get("anthropic_effort")
     checkpoint_enabled: bool = DEFAULT_CONFIG["checkpoint_enabled"]
     max_recur_limit: int = DEFAULT_CONFIG["max_recur_limit"]
+    max_parallel_runs: int = 1
     data_vendors: dict[str, str] = Field(default_factory=_default_data_vendors)
+    tool_vendors: dict[str, str] = Field(default_factory=dict)
+    llm_routes: dict[str, LLMRouteConfig] = Field(default_factory=dict)
     custom_data_interfaces: dict[str, CustomDataInterfaceConfig] = Field(
         default_factory=lambda: {
             key: CustomDataInterfaceConfig.model_validate(value)
@@ -164,6 +207,13 @@ class WebConfig(APIModel):
             raise ValueError(f"Unsupported LLM provider: {value}")
         return provider
 
+    @field_validator("max_parallel_runs")
+    @classmethod
+    def validate_max_parallel_runs(cls, value: int) -> int:
+        if value < 1 or value > 8:
+            raise ValueError("Parallel runs must be between 1 and 8.")
+        return value
+
     @field_validator("data_vendors")
     @classmethod
     def validate_data_vendors(cls, value: dict[str, str]) -> dict[str, str]:
@@ -176,10 +226,39 @@ class WebConfig(APIModel):
             vendors[key] = vendor
         return vendors
 
+    @field_validator("tool_vendors")
+    @classmethod
+    def validate_tool_vendors(cls, value: dict[str, str]) -> dict[str, str]:
+        vendors = {}
+        for method, vendor in value.items():
+            if method not in CUSTOM_METHOD_CATEGORIES:
+                raise ValueError(f"Unsupported data tool method: {method}")
+            category = CUSTOM_METHOD_CATEGORIES[method]
+            if vendor == "":
+                continue
+            if vendor not in ALLOWED_VENDOR_OPTIONS_BY_KEY[category]:
+                raise ValueError(f"Unsupported data vendor for {method}: {vendor}")
+            vendors[method] = vendor
+        return vendors
+
+    @field_validator("llm_routes")
+    @classmethod
+    def validate_llm_routes(cls, value: dict[str, LLMRouteConfig]) -> dict[str, LLMRouteConfig]:
+        routes = {}
+        for key, route in value.items():
+            if key not in LLM_ROUTE_KEYS:
+                raise ValueError(f"Unsupported LLM route target: {key}")
+            routes[key] = route
+        return routes
+
     @model_validator(mode="after")
     def validate_custom_interfaces(self) -> "WebConfig":
         if self.llm_provider == CUSTOM_OPENAI_PROVIDER and not self.backend_url:
             raise ValueError("Custom OpenAI-compatible provider requires a Base URL.")
+        for key, route in self.llm_routes.items():
+            provider = route.provider or self.llm_provider
+            if route.enabled and provider == CUSTOM_OPENAI_PROVIDER and not (route.backend_url or self.backend_url):
+                raise ValueError(f"Custom OpenAI-compatible LLM route for {key} requires a Base URL.")
 
         merged = {
             key: CustomDataInterfaceConfig.model_validate(value)
@@ -200,6 +279,10 @@ class WebConfig(APIModel):
         for key, vendor in self.data_vendors.items():
             if vendor == CUSTOM_DATA_VENDOR and not merged[key].base_url:
                 raise ValueError(f"Custom data interface for {key} requires a Base URL.")
+        for method, vendor in self.tool_vendors.items():
+            category = CUSTOM_METHOD_CATEGORIES[method]
+            if vendor == CUSTOM_DATA_VENDOR and not merged[category].base_url:
+                raise ValueError(f"Custom data interface for {method} requires a Base URL.")
 
         self.custom_data_interfaces = merged
         return self
@@ -268,7 +351,34 @@ class RunRequest(APIModel):
         return value
 
 
-RunState = Literal["queued", "running", "succeeded", "failed"]
+class BatchRunRequest(APIModel):
+    tickers: list[str]
+    analysis_date: date
+    config: WebConfig | None = None
+
+    @field_validator("tickers")
+    @classmethod
+    def validate_tickers(cls, value: list[str]) -> list[str]:
+        normalized = []
+        for ticker in value:
+            item = normalize_ticker_symbol(ticker)
+            if item and item not in normalized:
+                normalized.append(item)
+        if not normalized:
+            raise ValueError("Select at least one ticker.")
+        if len(normalized) > 50:
+            raise ValueError("Batch analysis supports up to 50 tickers.")
+        return normalized
+
+    @field_validator("analysis_date")
+    @classmethod
+    def validate_analysis_date(cls, value: date) -> date:
+        if value > date.today():
+            raise ValueError("Analysis date cannot be in the future.")
+        return value
+
+
+RunState = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 
 
 class RunInfo(APIModel):
@@ -282,6 +392,14 @@ class RunInfo(APIModel):
     error: str | None = None
     decision: str | None = None
     stats: dict[str, Any] = Field(default_factory=dict)
+
+
+class BatchRunResponse(APIModel):
+    runs: list[RunInfo]
+
+
+class RunListResponse(APIModel):
+    runs: list[RunInfo]
 
 
 class RunReports(APIModel):

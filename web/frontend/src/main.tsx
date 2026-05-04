@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   Activity,
@@ -14,16 +14,19 @@ import {
   History,
   KeyRound,
   Languages,
+  Lightbulb,
+  ListOrdered,
   Loader2,
   Play,
   RefreshCw,
   Save,
   Server,
   Settings2,
+  Square,
   TerminalSquare,
 } from 'lucide-react';
 import { api } from './api';
-import type { Metadata, ReportHistoryItem, ReportsPayload, RunEvent, RunInfo, SecretStatus, WebConfig } from './types';
+import type { HistoricalReport, Metadata, ReportHistoryItem, ReportsPayload, RunEvent, RunInfo, SecretStatus, WebConfig } from './types';
 import './styles.css';
 
 type Locale = 'en' | 'zh';
@@ -35,6 +38,7 @@ const messages = {
     eyebrow: 'TradingAgents Web Console',
     title: 'Multi-agent market research workspace',
     runAnalysis: 'Run analysis',
+    stopAnalysis: 'Stop analysis',
     workspace: 'Workspace',
     settings: 'Settings',
     connections: 'Settings / API keys',
@@ -45,6 +49,8 @@ const messages = {
     dataVendors: 'Data vendors',
     analysisSetup: 'Analysis setup',
     ticker: 'Ticker',
+    tickerList: 'Ticker list',
+    tickerListHint: 'Run one symbol, or paste a comma/newline separated list. Batch runs keep this order.',
     analysisDate: 'Analysis date',
     provider: 'Provider',
     providerRegion: 'Region',
@@ -61,6 +67,7 @@ const messages = {
     geminiThinking: 'Gemini thinking',
     anthropicEffort: 'Anthropic effort',
     checkpointResume: 'Checkpoint resume',
+    parallelRuns: 'Parallel stock runs',
     saveDefaults: 'Save defaults',
     connectionSettings: 'Provider settings',
     allApiKeys: 'API keys',
@@ -68,6 +75,15 @@ const messages = {
     fetchingModels: 'Fetching',
     modelFetchUnavailable: 'Model discovery is not available for this provider.',
     fetchedModels: 'models loaded',
+    parallelRoutes: 'Parallel/API routing',
+    parallelRoutesHint: 'Initial analysts are the safest fan-out candidates. Debate, trader, and risk nodes keep order but can use separate API routes to avoid one provider bottleneck.',
+    routeEnabled: 'Enable route',
+    routeModel: 'Route model',
+    routeApiKey: 'Route API key',
+    routeBaseUrl: 'Route Base URL',
+    inheritMainProvider: 'Inherit main provider',
+    parallelReady: 'parallel-ready',
+    sequential: 'sequential',
     agentTimeline: 'Agent timeline',
     timelineEmpty: 'Run an analysis to populate the agent timeline.',
     llmCalls: 'LLM calls',
@@ -79,14 +95,30 @@ const messages = {
     reportHistory: 'Report history',
     historyEmpty: 'No archived reports yet.',
     currentReport: 'Current run',
+    showCurrentRun: 'Show current run',
     archivedReport: 'Archived report',
     customInterfaces: 'Settings / Custom APIs',
     customOpenAiHint: 'OpenAI-compatible Base URL, model IDs, and CUSTOM_OPENAI_API_KEY.',
     customDataHint: 'Choose custom as a data vendor, then point that category at an HTTP service.',
+    methodOverrides: 'Method-level data routes',
+    useCategoryDefault: 'Use category default',
+    setupRecommendations: 'Setup recommendations',
+    recommendationsOk: 'Core settings look ready for the selected routes.',
+    batchQueue: 'Batch queue',
     endpointPath: 'Endpoint path',
     baseUrlRequired: 'Base URL for selected custom data categories',
     reports: 'Reports',
     final: 'Final',
+    backtestWatch: 'Backtest watch',
+    backtestNoReport: 'No report content to observe yet.',
+    extractedDecision: 'Decision',
+    entryPlan: 'Entry plan',
+    stopPlan: 'Stop plan',
+    targetPlan: 'Targets',
+    positionPlan: 'Position',
+    riskPlan: 'Risk triggers',
+    observationOrder: 'Observation order',
+    assumptionChecks: 'Assumptions to confirm',
     noReport: 'No report yet.',
     low: 'Low',
     medium: 'Medium',
@@ -95,14 +127,17 @@ const messages = {
     idle: 'idle',
     queued: 'queued',
     running: 'running',
+    pending: 'pending',
     succeeded: 'succeeded',
     failed: 'failed',
+    cancelled: 'cancelled',
   },
   zh: {
     loading: '正在加载 TradingAgents 控制台',
     eyebrow: 'TradingAgents Web 控制台',
     title: '多智能体金融市场研究工作台',
     runAnalysis: '开始分析',
+    stopAnalysis: '停止分析',
     workspace: '工作台',
     settings: '设置',
     connections: '设置 / API 密钥',
@@ -113,6 +148,8 @@ const messages = {
     dataVendors: '数据源',
     analysisSetup: '分析配置',
     ticker: '股票代码',
+    tickerList: '股票列表',
+    tickerListHint: '输入单只股票，或粘贴用逗号/换行分隔的股票列表；批量分析会按这个顺序排队执行。',
     analysisDate: '分析日期',
     provider: '模型供应商',
     providerRegion: '区域',
@@ -129,6 +166,7 @@ const messages = {
     geminiThinking: 'Gemini 思考模式',
     anthropicEffort: 'Anthropic Effort',
     checkpointResume: '启用断点续跑',
+    parallelRuns: '股票并行数',
     saveDefaults: '保存默认配置',
     connectionSettings: '供应商设置',
     allApiKeys: 'API 密钥',
@@ -136,6 +174,15 @@ const messages = {
     fetchingModels: '拉取中',
     modelFetchUnavailable: '该供应商暂不支持自动拉取模型。',
     fetchedModels: '个模型已加载',
+    parallelRoutes: '并行/API 路由',
+    parallelRoutesHint: '四个初始分析师最适合后续并行扇出；辩论、交易员和风控节点保持顺序，但可以分配独立 API 路由，避免单个供应商限流拖慢整体运行。',
+    routeEnabled: '启用路由',
+    routeModel: '路由模型',
+    routeApiKey: '路由 API Key',
+    routeBaseUrl: '路由接口地址',
+    inheritMainProvider: '继承主供应商',
+    parallelReady: '可并行',
+    sequential: '顺序执行',
     agentTimeline: '智能体时间线',
     timelineEmpty: '运行一次分析后，这里会显示智能体进度。',
     llmCalls: 'LLM 调用',
@@ -147,14 +194,30 @@ const messages = {
     reportHistory: '历史报告',
     historyEmpty: '暂无历史报告。',
     currentReport: '当前运行',
+    showCurrentRun: '查看当前运行',
     archivedReport: '历史报告',
     customInterfaces: '设置 / 自定义接口',
     customOpenAiHint: 'OpenAI-compatible Base URL、模型 ID 和 CUSTOM_OPENAI_API_KEY。',
     customDataHint: '将数据源选择为 custom 后，把对应分类指向你的 HTTP 数据服务。',
+    methodOverrides: '按后端方法单独设置数据源',
+    useCategoryDefault: '使用分类默认值',
+    setupRecommendations: '设置建议',
+    recommendationsOk: '当前模型和数据路由的核心设置已就绪。',
+    batchQueue: '批量队列',
     endpointPath: '接口路径',
     baseUrlRequired: '已选择 custom 的数据分类需要填写 Base URL',
     reports: '报告',
     final: '最终报告',
+    backtestWatch: '回测观察',
+    backtestNoReport: '暂无可复盘的报告内容。',
+    extractedDecision: '交易建议',
+    entryPlan: '入场计划',
+    stopPlan: '止损计划',
+    targetPlan: '目标位',
+    positionPlan: '仓位',
+    riskPlan: '风险触发',
+    observationOrder: '复盘顺序',
+    assumptionChecks: '需要确认的假设',
     noReport: '暂无报告。',
     low: '低',
     medium: '中',
@@ -163,8 +226,10 @@ const messages = {
     idle: '空闲',
     queued: '排队中',
     running: '运行中',
+    pending: '等待中',
     succeeded: '已完成',
     failed: '失败',
+    cancelled: '已停止',
   },
 };
 
@@ -257,6 +322,7 @@ const emptyMetadata: Metadata = {
   languages: [],
   dataVendorCategories: [],
   customDataMethods: [],
+  llmRouteTargets: [],
   secretFields: [],
 };
 
@@ -275,12 +341,15 @@ function App() {
   const [activeView, setActiveView] = useState<ViewMode>('workspace');
   const [metadata, setMetadata] = useState<Metadata>(emptyMetadata);
   const [config, setConfig] = useState<WebConfig | null>(null);
+  const [tickerList, setTickerList] = useState('');
   const [secretStatus, setSecretStatus] = useState<SecretStatus>({});
   const [secretDraft, setSecretDraft] = useState<Record<string, string>>({});
   const [discoveredModels, setDiscoveredModels] = useState<Record<string, Array<{ label: string; value: string }>>>({});
   const [activeRun, setActiveRun] = useState<RunInfo | null>(null);
+  const [batchRuns, setBatchRuns] = useState<RunInfo[]>([]);
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [reports, setReports] = useState<ReportsPayload | null>(null);
+  const [viewedArchive, setViewedArchive] = useState<HistoricalReport | null>(null);
   const [history, setHistory] = useState<ReportHistoryItem[]>([]);
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
   const [reportTab, setReportTab] = useState('finalReport');
@@ -288,19 +357,43 @@ function App() {
   const [isSaving, setSaving] = useState(false);
   const [isRunning, setRunning] = useState(false);
   const [isFetchingModels, setFetchingModels] = useState(false);
+  const eventSourceRef = useRef<EventSource | null>(null);
 
   const t = messages[locale];
 
   useEffect(() => {
-    Promise.all([api.metadata(), api.config(), api.secretStatus(), api.reportHistory()])
-      .then(([metadataValue, configValue, secretValue, historyValue]) => {
+    Promise.all([api.metadata(), api.config(), api.secretStatus(), api.reportHistory(), api.runs(true)])
+      .then(([metadataValue, configValue, secretValue, historyValue, activeRunsValue]) => {
         setMetadata({ ...emptyMetadata, ...metadataValue });
         setConfig(configValue);
+        setTickerList(configValue.ticker);
         setSecretStatus(secretValue);
         setHistory(historyValue.items);
+        if (activeRunsValue.runs.length > 0) {
+          const activeRuns = [...activeRunsValue.runs].sort((a, b) => a.submittedAt.localeCompare(b.submittedAt));
+          setBatchRuns(activeRuns);
+          setActiveRun(activeRuns[0]);
+          setRunning(true);
+          attachEvents(activeRuns[0].id, activeRuns, 0);
+        }
       })
       .catch((err) => setError(err.message));
   }, []);
+
+  useEffect(() => {
+    if (!isRunning) return undefined;
+    const timer = window.setInterval(() => {
+      api.runs(true)
+        .then((value) => {
+          if (value.runs.length > 0) {
+            const activeRuns = [...value.runs].sort((a, b) => a.submittedAt.localeCompare(b.submittedAt));
+            setBatchRuns((current) => mergeRunLists(current, activeRuns));
+          }
+        })
+        .catch(() => undefined);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [isRunning]);
 
   function changeLocale(value: Locale) {
     setLocale(value);
@@ -315,6 +408,11 @@ function App() {
   const providerModels = config ? mergedProviderModels(config.llmProvider) : undefined;
   const isCustomOpenAi = config?.llmProvider === 'custom_openai';
   const customNeedsManualModel = isCustomOpenAi && !discoveredModels[config?.llmProvider ?? '']?.length;
+  const outputLocale = outputLanguageLocale(config?.outputLanguage ?? 'English');
+  const setupRecommendations = useMemo(
+    () => (config ? buildSetupRecommendations(config, metadata, secretStatus, provider, locale) : []),
+    [config, metadata, secretStatus, provider, locale],
+  );
 
   function updateConfig<K extends keyof WebConfig>(key: K, value: WebConfig[K]) {
     setConfig((current) => (current ? { ...current, [key]: value } : current));
@@ -345,6 +443,34 @@ function App() {
   function updateVendor(key: string, value: string) {
     if (!config) return;
     updateConfig('dataVendors', { ...config.dataVendors, [key]: value });
+  }
+
+  function updateToolVendor(method: string, value: string) {
+    if (!config) return;
+    const next = { ...(config.toolVendors ?? {}) };
+    if (value) {
+      next[method] = value;
+    } else {
+      delete next[method];
+    }
+    updateConfig('toolVendors', next);
+  }
+
+  function updateLlmRoute(routeKey: string, patch: Partial<WebConfig['llmRoutes'][string]>) {
+    if (!config) return;
+    const current = config.llmRoutes?.[routeKey] ?? { enabled: false, provider: null, backendUrl: null, modelId: null };
+    updateConfig('llmRoutes', {
+      ...(config.llmRoutes ?? {}),
+      [routeKey]: { ...current, ...patch },
+    });
+  }
+
+  function changeTickerList(value: string) {
+    setTickerList(value);
+    const [firstTicker] = parseTickerList(value);
+    if (firstTicker) {
+      updateConfig('ticker', firstTicker);
+    }
   }
 
   function updateCustomDataBaseUrl(category: string, value: string) {
@@ -441,16 +567,38 @@ function App() {
     return options.some((item) => item.value === value) ? options : [{ label: value, value }, ...options];
   }
 
+  function routeModelOptions(mode: 'quick' | 'deep', providerValue: string, value: string) {
+    const fetched = discoveredModels[providerValue];
+    const options = fetched?.length ? fetched : metadata.models[providerValue]?.[mode] ?? [];
+    return options.some((item) => item.value === value) ? options : [{ label: value, value }, ...options];
+  }
+
   async function startRun() {
     if (!config) return;
+    const tickers = parseTickerList(tickerList || config.ticker);
+    if (tickers.length === 0) {
+      setError(locale === 'zh' ? '至少需要一个股票代码。' : 'At least one ticker is required.');
+      return;
+    }
+    const runConfig = { ...config, ticker: tickers[0] };
     setRunning(true);
     setError(null);
     setEvents([]);
     setReports(null);
     setSelectedHistoryId(null);
+    setViewedArchive(null);
+    setBatchRuns([]);
     try {
-      await api.saveConfig(config);
-      const run = await api.createRun(config);
+      const saved = await api.saveConfig(runConfig);
+      setConfig(saved);
+      if (tickers.length > 1) {
+        const batch = await api.createBatchRuns(tickers, saved);
+        setBatchRuns(batch.runs);
+        setActiveRun(batch.runs[0]);
+        attachEvents(batch.runs[0].id, batch.runs, 0);
+        return;
+      }
+      const run = await api.createRun(saved);
       setActiveRun(run);
       attachEvents(run.id);
     } catch (err) {
@@ -459,8 +607,32 @@ function App() {
     }
   }
 
-  function attachEvents(runId: string) {
+  async function stopAnalysis() {
+    const targets = batchRuns.length > 0 ? batchRuns.filter((run) => run.status === 'queued' || run.status === 'running') : activeRun ? [activeRun] : [];
+    if (targets.length === 0) return;
+    setError(null);
+    try {
+      const cancelled = await Promise.all(targets.map((run) => api.cancelRun(run.id)));
+      setBatchRuns((current) => mergeRunLists(current, cancelled));
+      const updatedActive = cancelled.find((run) => run.id === activeRun?.id) ?? cancelled[0];
+      setActiveRun(updatedActive);
+      if (cancelled.every((run) => run.status === 'cancelled')) {
+        setRunning(false);
+        eventSourceRef.current?.close();
+        eventSourceRef.current = null;
+      }
+      api.runs(true).then((value) => {
+        if (value.runs.length === 0) setRunning(false);
+      }).catch(() => undefined);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function attachEvents(runId: string, sequence?: RunInfo[], sequenceIndex = 0) {
+    eventSourceRef.current?.close();
     const source = new EventSource(`/api/runs/${runId}/events`);
+    eventSourceRef.current = source;
     const onEvent = (message: MessageEvent) => {
       const event = JSON.parse(message.data) as RunEvent;
       setEvents((current) => [...current, event].slice(-200));
@@ -470,10 +642,20 @@ function App() {
       if (event.type === 'status') {
         api.run(runId).then((run) => {
           setActiveRun(run);
-          if (run.status === 'succeeded' || run.status === 'failed') {
-            setRunning(false);
+          if (sequence) {
+            setBatchRuns((current) => current.map((item) => (item.id === run.id ? run : item)));
+          }
+          if (run.status === 'succeeded' || run.status === 'failed' || run.status === 'cancelled') {
             source.close();
+            if (eventSourceRef.current === source) eventSourceRef.current = null;
             api.reports(runId).then(setReports).catch(() => undefined);
+            const nextRun = sequence?.slice(sequenceIndex + 1).find((item) => item.status === 'queued' || item.status === 'running');
+            if (nextRun) {
+              setActiveRun(nextRun);
+              attachEvents(nextRun.id, sequence ?? [], sequence?.findIndex((item) => item.id === nextRun.id) ?? 0);
+              return;
+            }
+            setRunning(false);
             api.reportHistory().then((value) => setHistory(value.items)).catch(() => undefined);
           }
         });
@@ -484,6 +666,7 @@ function App() {
     });
     source.onerror = () => {
       source.close();
+      if (eventSourceRef.current === source) eventSourceRef.current = null;
       setRunning(false);
     };
   }
@@ -492,15 +675,31 @@ function App() {
     setError(null);
     try {
       const archive = await api.historicalReport(runId);
-      setReports({
-        runId: archive.run.id,
-        reports: archive.reports,
-        finalReport: archive.finalReport,
-        decision: archive.decision,
-      });
-      setActiveRun(archive.run);
+      setViewedArchive(archive);
       setSelectedHistoryId(runId);
       setReportTab('finalReport');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function showCurrentRun() {
+    setViewedArchive(null);
+    setSelectedHistoryId(null);
+    setReportTab('finalReport');
+  }
+
+  async function selectLiveRun(runId: string) {
+    setError(null);
+    setSelectedHistoryId(null);
+    setViewedArchive(null);
+    setEvents([]);
+    setReports(null);
+    try {
+      const run = await api.run(runId);
+      setActiveRun(run);
+      api.reports(runId).then(setReports).catch(() => undefined);
+      attachEvents(runId);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -521,7 +720,18 @@ function App() {
     | { agents?: Record<string, string>; stats?: Record<string, number>; elapsedSeconds?: number }
     | undefined;
   const agentStatus = progress?.agents ?? {};
-  const reportEntries = reports?.reports ? Object.entries(reports.reports) : [];
+  const displayedReports: ReportsPayload | null =
+    selectedHistoryId && viewedArchive
+      ? {
+          runId: viewedArchive.run.id,
+          reports: viewedArchive.reports,
+          finalReport: viewedArchive.finalReport,
+          decision: viewedArchive.decision,
+        }
+      : reports;
+  const displayedRun = selectedHistoryId && viewedArchive ? viewedArchive.run : activeRun;
+  const reportEntries = displayedReports?.reports ? Object.entries(displayedReports.reports) : [];
+  const backtestObservation = buildBacktestObservation(displayedReports, displayedRun, outputLocale);
 
   return (
     <main className="app-shell" lang={locale === 'zh' ? 'zh-CN' : 'en'}>
@@ -556,6 +766,12 @@ function App() {
             {isRunning ? <Loader2 className="spin" size={17} /> : <Play size={17} />}
             {t.runAnalysis}
           </button>
+          {isRunning && (
+            <button className="secondary danger" onClick={stopAnalysis}>
+              <Square size={15} />
+              {t.stopAnalysis}
+            </button>
+          )}
         </div>
       </header>
 
@@ -648,14 +864,102 @@ function App() {
               </div>
             </Panel>
 
+            <Panel title={t.parallelRoutes} icon={<Activity size={17} />}>
+              <p className="hint">{t.parallelRoutesHint}</p>
+              <div className="route-grid">
+                {metadata.llmRouteTargets.map((target) => {
+                  const route = config.llmRoutes?.[target.key] ?? { enabled: false, provider: null, backendUrl: null, modelId: null };
+                  const routeProvider = route.provider || config.llmProvider;
+                  const routeProviderMeta = metadata.providers.find((item) => item.value === routeProvider);
+                  const routeModels = routeModelOptions(target.defaultModelRole, routeProvider, route.modelId || modelForRole(config, target.defaultModelRole));
+                  return (
+                    <section key={target.key} className={route.enabled ? 'route-card active' : 'route-card'}>
+                      <div className="route-card-head">
+                        <div>
+                          <strong>{routeLabel(target.label, locale)}</strong>
+                          <small>{target.parallelizable ? t.parallelReady : t.sequential}</small>
+                        </div>
+                        <label className="mini-toggle">
+                          <input
+                            type="checkbox"
+                            checked={route.enabled}
+                            onChange={(event) => updateLlmRoute(target.key, { enabled: event.target.checked })}
+                          />
+                          <span>{t.routeEnabled}</span>
+                        </label>
+                      </div>
+                      <p className="hint">{locale === 'zh' ? routeDescription(target.stage, target.parallelizable) : target.description}</p>
+                      <div className="route-fields">
+                        <label className="field">
+                          <span>{t.provider}</span>
+                          <select value={route.provider ?? ''} onChange={(event) => updateLlmRoute(target.key, { provider: event.target.value || null })}>
+                            <option value="">{t.inheritMainProvider}</option>
+                            {metadata.providers.map((item) => (
+                              <option key={item.value} value={item.value}>
+                                {item.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>{t.routeBaseUrl}</span>
+                          <input
+                            value={route.backendUrl ?? ''}
+                            onChange={(event) => updateLlmRoute(target.key, { backendUrl: event.target.value || null })}
+                            placeholder={routeProviderMeta?.defaultBaseUrl ?? t.providerDefault}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>{t.routeModel}</span>
+                          <select value={route.modelId ?? ''} onChange={(event) => updateLlmRoute(target.key, { modelId: event.target.value || null })}>
+                            <option value="">{modelForRole(config, target.defaultModelRole)}</option>
+                            {routeModels.map((item) => (
+                              <option key={item.value} value={item.value}>
+                                {item.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="secret-row route-secret">
+                          <span>
+                            {target.apiKeyField}
+                            <small>{secretStatus[target.apiKeyField]?.configured ? secretStatus[target.apiKeyField]?.masked : t.notConfigured}</small>
+                          </span>
+                          <input
+                            type="password"
+                            autoComplete="off"
+                            placeholder={secretStatus[target.apiKeyField]?.configured ? t.replaceValue : t.pasteKey}
+                            value={secretDraft[target.apiKeyField] ?? ''}
+                            onChange={(event) => setSecretDraft((current) => ({ ...current, [target.apiKeyField]: event.target.value }))}
+                          />
+                        </label>
+                      </div>
+                    </section>
+                  );
+                })}
+              </div>
+              <div className="actions-row">
+                <button className="secondary" onClick={saveSecrets} disabled={isSaving}>
+                  <Save size={16} />
+                  {t.saveSecrets}
+                </button>
+                <button className="secondary" onClick={saveConfig} disabled={isSaving}>
+                  <Save size={16} />
+                  {t.saveDefaults}
+                </button>
+              </div>
+            </Panel>
+
             <Panel title={t.customInterfaces} icon={<Server size={17} />}>
               <p className="hint">{t.customOpenAiHint}</p>
               <p className="hint">{t.customDataHint}</p>
               <div className="custom-interface-list">
                 {metadata.dataVendorCategories.map((category) => {
-                  const selectedCustom = config.dataVendors[category.key] === 'custom';
                   const settings = config.customDataInterfaces[category.key] ?? { baseUrl: null, endpoints: {} };
                   const methods = metadata.customDataMethods.filter((method) => method.category === category.key);
+                  const selectedCustom =
+                    config.dataVendors[category.key] === 'custom' ||
+                    methods.some((method) => (config.toolVendors ?? {})[method.method] === 'custom');
                   return (
                     <section key={category.key} className={selectedCustom ? 'custom-interface active' : 'custom-interface'}>
                       <label className="field">
@@ -687,6 +991,18 @@ function App() {
           </section>
 
           <aside className="settings-side">
+            <Panel title={t.setupRecommendations} icon={<Lightbulb size={17} />}>
+              <div className="recommendation-list">
+                {setupRecommendations.map((item) => (
+                  <div key={item} className="recommendation-row">
+                    <CircleAlert size={15} />
+                    <span>{item}</span>
+                  </div>
+                ))}
+                {setupRecommendations.length === 0 && <span className="empty">{t.recommendationsOk}</span>}
+              </div>
+            </Panel>
+
             <Panel title={t.allApiKeys} icon={<KeyRound size={17} />}>
               <div className="secret-list">
                 {metadata.secretFields.map((field) => (
@@ -724,6 +1040,32 @@ function App() {
                   </select>
                 </label>
               ))}
+              <div className="section-title">
+                <ListOrdered size={16} />
+                {t.methodOverrides}
+              </div>
+              <div className="method-vendor-list">
+                {metadata.customDataMethods.map((method) => {
+                  const category = metadata.dataVendorCategories.find((item) => item.key === method.category);
+                  const categoryVendor = config.dataVendors[method.category] ?? '';
+                  return (
+                    <label key={method.method} className="field method-vendor-row">
+                      <span>
+                        {customMethodLabels[locale][method.method] ?? method.label}
+                        <small>{dataVendorLabels[locale][method.category] ?? category?.label ?? method.category}</small>
+                      </span>
+                      <select value={(config.toolVendors ?? {})[method.method] ?? ''} onChange={(event) => updateToolVendor(method.method, event.target.value)}>
+                        <option value="">{t.useCategoryDefault} ({categoryVendor})</option>
+                        {(category?.options ?? []).map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  );
+                })}
+              </div>
             </Panel>
           </aside>
         </section>
@@ -732,9 +1074,10 @@ function App() {
         <section className="main-column">
           <Panel title={t.analysisSetup} icon={<Settings2 size={17} />}>
             <div className="form-grid">
-              <label className="field">
-                <span>{t.ticker}</span>
-                <input value={config.ticker} onChange={(event) => updateConfig('ticker', event.target.value)} placeholder="SPY, 0700.HK" />
+              <label className="field ticker-list-field">
+                <span>{t.tickerList}</span>
+                <textarea value={tickerList} onChange={(event) => changeTickerList(event.target.value)} placeholder="SPY, 0700.HK, AAPL" />
+                <small>{t.tickerListHint}</small>
               </label>
               <label className="field">
                 <span>{t.analysisDate}</span>
@@ -873,6 +1216,16 @@ function App() {
                   <option value="high">{t.high}</option>
                 </select>
               </label>
+              <label className="field">
+                <span>{t.parallelRuns}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={8}
+                  value={config.maxParallelRuns}
+                  onChange={(event) => updateConfig('maxParallelRuns', clampNumber(event.target.value, 1, 8))}
+                />
+              </label>
               <label className="toggle-row">
                 <input
                   type="checkbox"
@@ -889,6 +1242,22 @@ function App() {
                 {t.saveDefaults}
               </button>
             </div>
+            {batchRuns.length > 0 && (
+              <div className="batch-queue">
+                <div className="section-title">
+                  <ListOrdered size={16} />
+                  {t.batchQueue}
+                </div>
+                <div className="batch-list">
+                  {batchRuns.map((run, index) => (
+                    <button key={run.id} className={`batch-chip ${run.status}`} onClick={() => selectLiveRun(run.id)}>
+                      {index + 1}. {run.ticker}
+                      <small>{statusLabel(run.status, outputLocale)}</small>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </Panel>
 
           <Panel title={t.agentTimeline} icon={<Activity size={17} />}>
@@ -896,8 +1265,8 @@ function App() {
               {Object.entries(agentStatus).map(([agent, status]) => (
                 <span key={agent} className={`agent ${status}`}>
                   <BadgeCheck size={15} />
-                  {agentLabels[locale][agent] ?? agent}
-                  <small>{statusLabel(status, locale)}</small>
+                  {agentLabels[outputLocale][agent] ?? agent}
+                  <small>{statusLabel(status, outputLocale)}</small>
                 </span>
               ))}
               {Object.keys(agentStatus).length === 0 && <span className="empty">{t.timelineEmpty}</span>}
@@ -939,8 +1308,8 @@ function App() {
             <div className="event-list">
               {[...events].reverse().slice(0, 30).map((event) => (
                 <div key={`${event.id}-${event.timestamp}`} className="event-row">
-                  <span>{eventLabels[locale][event.type] ?? event.type}</span>
-                  <p>{eventSummary(event, locale)}</p>
+                  <span>{eventLabels[outputLocale][event.type] ?? event.type}</span>
+                  <p>{eventSummary(event, outputLocale)}</p>
                 </div>
               ))}
               {events.length === 0 && <span className="empty">{t.eventsEmpty}</span>}
@@ -948,17 +1317,25 @@ function App() {
           </Panel>
 
           <Panel title={t.reports} icon={<Server size={17} />}>
-            {reports && (
+            {displayedReports && (
               <div className="report-context">
                 <strong>
-                  {activeRun?.ticker ?? reports.runId.slice(0, 8)} · {activeRun?.analysisDate ?? reports.runId.slice(0, 8)}
+                  {displayedRun?.ticker ?? displayedReports.runId.slice(0, 8)} · {displayedRun?.analysisDate ?? displayedReports.runId.slice(0, 8)}
                 </strong>
                 <span>{selectedHistoryId ? t.archivedReport : t.currentReport}</span>
+                {selectedHistoryId && (reports || activeRun) && (
+                  <button className="text-button" onClick={showCurrentRun}>
+                    {t.showCurrentRun}
+                  </button>
+                )}
               </div>
             )}
             <div className="tabs">
               <button className={reportTab === 'finalReport' ? 'active' : ''} onClick={() => setReportTab('finalReport')}>
                 {t.final}
+              </button>
+              <button className={reportTab === 'backtestWatch' ? 'active' : ''} onClick={() => setReportTab('backtestWatch')}>
+                {t.backtestWatch}
               </button>
               {reportEntries.map(([key]) => (
                 <button key={key} className={reportTab === key ? 'active' : ''} onClick={() => setReportTab(key)}>
@@ -967,7 +1344,11 @@ function App() {
               ))}
             </div>
             <article className="report-view">
-              <pre>{reportTab === 'finalReport' ? reports?.finalReport ?? t.noReport : stringifyReport(reports?.reports?.[reportTab], t.noReport)}</pre>
+              {reportTab === 'backtestWatch' ? (
+                <BacktestObservationView observation={backtestObservation} labels={t} />
+              ) : (
+                <pre>{reportTab === 'finalReport' ? displayedReports?.finalReport ?? t.noReport : stringifyReport(displayedReports?.reports?.[reportTab], t.noReport)}</pre>
+              )}
             </article>
           </Panel>
         </aside>
@@ -1029,6 +1410,255 @@ function Metric({ label, value }: { label: string; value: string | number }) {
   );
 }
 
+type BacktestObservation = {
+  hasReport: boolean;
+  decision: string;
+  entry: string;
+  stop: string;
+  targets: string;
+  position: string;
+  risks: string;
+  order: string[];
+  assumptions: string[];
+};
+
+function BacktestObservationView({ observation, labels }: { observation: BacktestObservation; labels: Record<string, string> }) {
+  if (!observation.hasReport) {
+    return <span className="empty">{labels.backtestNoReport}</span>;
+  }
+  return (
+    <div className="observation-view">
+      <div className="observation-grid">
+        <ObservationCard label={labels.extractedDecision} value={observation.decision} />
+        <ObservationCard label={labels.entryPlan} value={observation.entry} />
+        <ObservationCard label={labels.stopPlan} value={observation.stop} />
+        <ObservationCard label={labels.targetPlan} value={observation.targets} />
+        <ObservationCard label={labels.positionPlan} value={observation.position} />
+        <ObservationCard label={labels.riskPlan} value={observation.risks} />
+      </div>
+      <section className="observation-section">
+        <h3>{labels.observationOrder}</h3>
+        <ol>
+          {observation.order.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ol>
+      </section>
+      <section className="observation-section">
+        <h3>{labels.assumptionChecks}</h3>
+        <ul>
+          {observation.assumptions.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  );
+}
+
+function ObservationCard({ label, value }: { label: string; value: string }) {
+  return (
+    <section className="observation-card">
+      <span>{label}</span>
+      <p>{value || '-'}</p>
+    </section>
+  );
+}
+
+function modelForRole(config: WebConfig, role: 'quick' | 'deep') {
+  return role === 'deep' ? config.deepThinkLlm : config.quickThinkLlm;
+}
+
+function routeLabel(value: string, locale: Locale) {
+  return agentLabels[locale][value] ?? value;
+}
+
+function routeDescription(stage: string, parallelizable: boolean) {
+  if (parallelizable) return '该初始分析节点与其他初始分析师没有强顺序依赖，适合后续并行扇出，也适合配置独立 API Key 分摊限流。';
+  if (stage === 'research') return '该研究辩论节点依赖前文对话，保持顺序执行；独立 API 路由主要用于分摊限流。';
+  if (stage === 'risk') return '该风控辩论节点依赖交易计划和前序风控意见，保持顺序执行；独立 API 路由主要用于分摊限流。';
+  return '该节点依赖上一阶段输出，保持默认顺序执行；独立 API 路由主要用于分摊限流。';
+}
+
+function clampNumber(value: string, min: number, max: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return min;
+  return Math.max(min, Math.min(max, Math.round(parsed)));
+}
+
+function mergeRunLists(current: RunInfo[], active: RunInfo[]) {
+  const merged = new Map(current.map((run) => [run.id, run]));
+  active.forEach((run) => merged.set(run.id, run));
+  return [...merged.values()].sort((a, b) => a.submittedAt.localeCompare(b.submittedAt));
+}
+
+function buildBacktestObservation(payload: ReportsPayload | null, run: RunInfo | null, locale: Locale): BacktestObservation {
+  const text = reportText(payload);
+  const hasReport = Boolean(text.trim());
+  const fallback = locale === 'zh' ? '报告未明确给出，需要人工确认。' : 'Not explicit in the report; confirm manually.';
+  const decision =
+    extractReportLine(text, [
+      /最终交易建议\s*[：:]\s*([^\n]+)/i,
+      /最终交易决策\s*[：:]\s*([^\n]+)/i,
+      /Final\s+(?:trading\s+)?(?:recommendation|decision)\s*[：:]\s*([^\n]+)/i,
+      /Portfolio Manager Decision\s*\n+([^\n]+)/i,
+    ]) || payload?.decision || run?.decision || fallback;
+  const entry =
+    extractReportLine(text, [
+      /[-*]\s*(?:\*\*)?(?:策略|入场|买入计划)(?:\*\*)?\s*[：:]\s*([^\n]+)/i,
+      /(?:Entry|Strategy)\s*(?:plan)?\s*[：:]\s*([^\n]+)/i,
+    ]) || fallback;
+  const stop =
+    extractReportLine(text, [
+      /[-*]\s*(?:\*\*)?(?:止损|止损位)(?:\*\*)?\s*[：:]\s*([^\n]+)/i,
+      /(?:Stop|Stop loss)\s*[：:]\s*([^\n]+)/i,
+    ]) || fallback;
+  const targets =
+    extractReportLine(text, [
+      /[-*]\s*(?:\*\*)?(?:目标|目标价|止盈)(?:\*\*)?\s*[：:]\s*([^\n]+)/i,
+      /(?:Target|Targets|Take profit)\s*[：:]\s*([^\n]+)/i,
+    ]) || fallback;
+  const position =
+    extractReportLine(text, [
+      /[-*]\s*(?:\*\*)?(?:仓位|头寸)(?:\*\*)?\s*[：:]\s*([^\n]+)/i,
+      /(?:Position|Sizing)\s*[：:]\s*([^\n]+)/i,
+    ]) || fallback;
+  const risks =
+    extractReportLine(text, [
+      /[-*]\s*(?:\*\*)?(?:风险提示|风险|失效条件)(?:\*\*)?\s*[：:]\s*([^\n]+)/i,
+      /(?:Risk|Invalidation)\s*(?:trigger|note|condition)?s?\s*[：:]\s*([^\n]+)/i,
+    ]) || fallback;
+
+  const zh = locale === 'zh';
+  const order = zh
+    ? [
+        '先观察价格是否触达报告给出的入场条件或回调区域；没有触发入场前，不统计止损和目标是否命中。',
+        '一旦触发入场，记录成交日期和成交价；后续止损、目标都从这个时间点之后开始判断。',
+        '按时间顺序比较止损位、第一目标、第二目标和风险失效条件；顺序比单纯是否触达更重要。',
+        '如果同一根 K 线同时覆盖入场、止损或目标，需要使用更细粒度行情确认先后顺序。',
+      ]
+    : [
+        'First check whether price reaches the report entry condition or pullback zone; before entry, stop/target hits are not counted.',
+        'After entry, record the fill date and fill price; stop and target checks start after that fill.',
+        'Compare stop, first target, second target, and invalidation triggers chronologically; sequence matters more than simple touch/no-touch.',
+        'If one candle contains entry, stop, or target at the same time, use finer-grained data to resolve the order.',
+      ];
+  const assumptions = zh
+    ? [
+        stop.includes('入场价') || /entry/i.test(stop)
+          ? '止损描述为“入场价下方”的价差规则，应在实际成交后用成交价计算，不应直接用当前价计算。'
+          : '止损基准没有完全明确，复盘时需要确认它是固定价格、相对入场价，还是关键支撑位。',
+        /ATR|支撑|support/i.test(stop)
+          ? '如果 ATR 止损和关键支撑位同时存在，需要确定采用哪个规则，或采用二者中更保守的一档。'
+          : '如果报告没有给出 ATR/支撑位细节，后续自动回测只能先标记为人工复核项。',
+        '复盘观察只拆解报告和执行顺序，不改动 TradingAgents 后端分析框架。',
+      ]
+    : [
+        /entry/i.test(stop) || stop.includes('入场价')
+          ? 'The stop is described as a distance below entry, so compute it from the actual fill price rather than the current price.'
+          : 'The stop basis is not fully explicit; confirm whether it is a fixed price, relative to entry, or tied to support.',
+        /ATR|support|支撑/i.test(stop)
+          ? 'When ATR stop and support stop both appear, decide which rule is authoritative, or use the more conservative level.'
+          : 'If ATR/support details are absent, mark the stop as a manual review item before automated backtesting.',
+        'This observation layer parses the report and execution sequence without changing the TradingAgents backend framework.',
+      ];
+
+  return { hasReport, decision, entry, stop, targets, position, risks, order, assumptions };
+}
+
+function reportText(payload: ReportsPayload | null) {
+  if (!payload) return '';
+  const parts = [payload.finalReport ?? '', payload.decision ?? ''];
+  Object.values(payload.reports ?? {}).forEach((value) => {
+    parts.push(typeof value === 'string' ? value : JSON.stringify(value, null, 2));
+  });
+  return parts.filter(Boolean).join('\n\n');
+}
+
+function extractReportLine(text: string, patterns: RegExp[]) {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return match[1].replace(/\*\*/g, '').trim();
+  }
+  return '';
+}
+
+function parseTickerList(value: string) {
+  const tickers: string[] = [];
+  value
+    .split(/[\s,，;；]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .forEach((item) => {
+      const ticker = item.includes('.') ? item.replace(/\s+/g, '').toUpperCase() : item.replace(/\s+/g, '').toUpperCase();
+      if (ticker && !tickers.includes(ticker)) tickers.push(ticker);
+    });
+  return tickers.slice(0, 50);
+}
+
+function outputLanguageLocale(language: string): Locale {
+  const normalized = language.trim().toLowerCase();
+  return normalized.startsWith('chinese') || normalized === '中文' || normalized.startsWith('zh') ? 'zh' : 'en';
+}
+
+function buildSetupRecommendations(
+  config: WebConfig,
+  metadata: Metadata,
+  secretStatus: SecretStatus,
+  provider: Metadata['providers'][number] | undefined,
+  locale: Locale,
+) {
+  const items: string[] = [];
+  const toolVendors = config.toolVendors ?? {};
+  const methodCategory = Object.fromEntries(metadata.customDataMethods.map((method) => [method.method, method.category]));
+  const selectedVendors = [...Object.values(config.dataVendors), ...Object.values(toolVendors)];
+
+  if (provider?.apiKeyField && !secretStatus[provider.apiKeyField]?.configured) {
+    items.push(locale === 'zh' ? `当前模型供应商需要配置 ${provider.apiKeyField}。` : `Configure ${provider.apiKeyField} for the selected LLM provider.`);
+  }
+
+  if (selectedVendors.includes('alpha_vantage') && !secretStatus.ALPHA_VANTAGE_API_KEY?.configured) {
+    items.push(locale === 'zh' ? '已选择 Alpha Vantage 数据源，需要配置 ALPHA_VANTAGE_API_KEY。' : 'Alpha Vantage is selected for data, so ALPHA_VANTAGE_API_KEY is required.');
+  }
+
+  const customCategories = new Set<string>();
+  Object.entries(config.dataVendors).forEach(([category, vendor]) => {
+    if (vendor === 'custom') customCategories.add(category);
+  });
+  Object.entries(toolVendors).forEach(([method, vendor]) => {
+    if (vendor === 'custom' && methodCategory[method]) customCategories.add(methodCategory[method]);
+  });
+
+  if (customCategories.size > 0 && !secretStatus.CUSTOM_DATA_API_KEY?.configured) {
+    items.push(locale === 'zh' ? '已启用 custom 数据接口，建议配置 CUSTOM_DATA_API_KEY 保护自定义数据服务。' : 'Custom data routes are enabled; configure CUSTOM_DATA_API_KEY to protect the custom data service.');
+  }
+
+  const missingCustomBase = [...customCategories].filter((category) => !config.customDataInterfaces[category]?.baseUrl);
+  if (missingCustomBase.length > 0) {
+    const names = missingCustomBase.map((category) => dataVendorLabels[locale][category] ?? category).join(', ');
+    items.push(locale === 'zh' ? `这些 custom 数据分类还缺少 Base URL：${names}。` : `Custom data Base URL is missing for: ${names}.`);
+  }
+
+  const newsMethods = metadata.customDataMethods.filter((method) => method.category === 'news_data');
+  const newsUsesYfinance = newsMethods.some((method) => (toolVendors[method.method] || config.dataVendors.news_data) === 'yfinance');
+  if (newsUsesYfinance) {
+    items.push(locale === 'zh' ? '新闻数据仍有方法使用 yfinance；如需更完整的个股新闻/全球新闻，建议将 get_news 与 get_global_news 分别配置为 Alpha Vantage 或 custom。' : 'Some news methods still use yfinance; for fuller ticker/global news coverage, route get_news and get_global_news to Alpha Vantage or custom services.');
+  }
+
+  const enabledRoutes = metadata.llmRouteTargets.filter((target) => config.llmRoutes?.[target.key]?.enabled);
+  const missingRouteKeys = enabledRoutes.filter((target) => !secretStatus[target.apiKeyField]?.configured);
+  if (missingRouteKeys.length > 0) {
+    const names = missingRouteKeys.map((target) => routeLabel(target.label, locale)).join(', ');
+    items.push(locale === 'zh' ? `这些 LLM 路由没有独立 API Key，会回退到供应商默认 Key：${names}。` : `These LLM routes do not have separate API keys and will fall back to the provider key: ${names}.`);
+  }
+
+  if (config.maxParallelRuns > 1 && enabledRoutes.length === 0) {
+    items.push(locale === 'zh' ? '已启用多股票并行；建议为初始分析师配置独立 LLM 路由，避免多个并发任务挤在同一个 API Key 上。' : 'Parallel stock runs are enabled; consider separate analyst LLM routes so concurrent jobs do not share one API key.');
+  }
+
+  return items;
+}
+
 function cleanLabel(value: string) {
   return value.replace(/_/g, ' ').replace(/\b\w/g, (item) => item.toUpperCase());
 }
@@ -1054,7 +1684,7 @@ function stringifyReport(value: unknown, emptyText: string) {
 function eventSummary(event: RunEvent, locale: Locale) {
   const payload = event.payload;
   if (typeof payload.message === 'string') return translateEventMessage(payload.message, locale);
-  if (typeof payload.content === 'string') return payload.content.slice(0, 160);
+  if (typeof payload.content === 'string') return translateEventContent(payload.content, locale).slice(0, 160);
   if (typeof payload.name === 'string') return payload.name;
   if (typeof payload.status === 'string') return statusLabel(payload.status, locale);
   return JSON.stringify(payload).slice(0, 160);
@@ -1069,6 +1699,25 @@ function translateEventMessage(value: string, locale: Locale) {
     'Analysis completed.': '分析已完成。',
   };
   return known[value] ?? value;
+}
+
+function translateEventContent(value: string, locale: Locale) {
+  if (locale === 'en') return value;
+  const noDataMatch = value.match(/^No (income statement|cash flow|balance sheet) data found for symbol '([^']+)'/);
+  if (noDataMatch) {
+    const label: Record<string, string> = {
+      'income statement': '利润表',
+      'cash flow': '现金流量表',
+      'balance sheet': '资产负债表',
+    };
+    return `未找到 ${noDataMatch[2]} 的${label[noDataMatch[1]]}数据。`;
+  }
+  return value
+    .replace(/# Company Fundamentals for ([^\n#]+)/g, '# 公司基本面：$1')
+    .replace(/# Data retrieved on:/g, '# 数据获取时间：')
+    .replace(/\bName:/g, '名称：')
+    .replace(/\bPE Ratio \(TTM\):/g, '市盈率 (TTM)：')
+    .replace(/\bPrice to Book:/g, '市净率：');
 }
 
 createRoot(document.getElementById('root')!).render(<App />);

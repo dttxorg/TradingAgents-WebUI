@@ -18,10 +18,16 @@ instead of being hard-coded in the React app.
   provider/model/base URL, output language, checkpointing, and data vendors
 - Secret entry with masked status only; API keys are not returned to the browser
 - Queued single-run execution with Server-Sent Events for live progress
+- Active run recovery after browser refresh, plus stop/cancel controls for
+  queued and running analyses
+- Ordered batch analysis for multiple tickers, with configurable parallel stock
+  workers
 - Report tabs for agent output, final report, stats, and decision
 - Persistent report history for reviewing prior runs and preparing future
   backtesting workflows
 - Custom OpenAI-compatible LLM endpoints and custom HTTP data interfaces
+- Per-agent LLM routing so parallelizable or rate-limit-sensitive steps can use
+  separate provider/API-key/model/Base URL settings
 - Dedicated Settings view for API keys, provider Base URLs, data interfaces,
   and provider model discovery
 - English and Chinese WebUI with a persistent language switch
@@ -80,7 +86,9 @@ settings, enter the gateway Base URL, set the quick/deep model IDs, and save
 implement the OpenAI Chat Completions API.
 
 To use a custom data service, choose `custom` for one or more data vendor
-categories and set that category's Base URL and endpoint paths. The WebUI calls:
+categories, or override a specific backend data method such as `get_news` or
+`get_global_news`, then set that category's Base URL and endpoint paths. The
+WebUI calls:
 
 ```http
 POST {baseUrl}{endpoint}
@@ -99,6 +107,29 @@ Payload:
 ```
 
 The response may be plain text, JSON, or JSON with a top-level `data` field.
+
+### Parallelism and Backtest Observation
+
+The current upstream TradingAgents graph runs the analyst nodes in a fixed
+sequence, then runs research debate, trader, and risk debate in order. The safest
+parallelism in this WebUI is therefore multiple stock runs at once. Set
+`Parallel stock runs` to 2-8 to let the backend process several tickers
+concurrently.
+
+The Settings page also exposes per-agent LLM routes. The four initial analysts
+are marked as parallel-ready for future graph fan-out; debate, trader, and risk
+nodes remain sequential but can still use separate API keys to reduce provider
+rate-limit pressure.
+
+The `Backtest watch` tab parses completed reports into an observation checklist:
+entry condition first, then stop/target/risk checks only after entry is reached.
+It does not change the TradingAgents backend strategy logic; it prepares a
+stable review surface for later automated backtesting.
+
+SOCKS5/HTTP proxying is intentionally not enabled as a raw WebUI field because
+an arbitrary proxy can see prompts, report content, and API credentials. For
+trusted network routing, point a route `Base URL` at your own OpenAI-compatible
+gateway or provider-side proxy instead.
 
 ### License
 
@@ -121,9 +152,13 @@ TradingAgents-WebUI 是一个面向
   地址、报告输出语言、断点续跑和数据源
 - API Key 只支持写入和掩码状态展示，不会向浏览器返回明文密钥
 - 单任务队列执行，并通过 Server-Sent Events 实时展示运行进度
+- 浏览器刷新后可恢复正在排队/运行中的工作流，并支持停止排队或运行中的分析
+- 支持多股票按列表提交，并可配置股票任务并行 worker 数
 - 报告 Tabs 展示智能体输出、最终报告、统计信息和决策结果
 - 持久化历史报告，方便回看历史运行结果，并为后续回测功能准备数据基础
 - 支持自定义 OpenAI-compatible 模型接口和自定义 HTTP 数据接口
+- 支持按智能体配置独立 LLM 路由，使可并行或容易限流的步骤可以使用不同的
+  供应商/API Key/模型/Base URL
 - 独立 Settings 页面，集中管理 API Key、供应商 Base URL、数据接口和模型拉取
 - WebUI 支持中文和英文界面，并记住用户选择
 - Docker Compose 持久化日志、缓存、记忆、密钥和 WebUI 配置
@@ -174,8 +209,9 @@ OpenAI-compatible 供应商会调用 `GET {baseUrl}/models`；Google 和 Anthrop
 填写网关 Base URL、快速/深度模型 ID，并在 API Key 面板保存
 `CUSTOM_OPENAI_API_KEY`。该模式适用于实现 OpenAI Chat Completions API 的服务。
 
-如果要使用自定义数据服务，将某个数据分类的数据源选择为 `custom`，然后为该分类
-填写 Base URL 和 endpoint path。WebUI 会发起：
+如果要使用自定义数据服务，将某个数据分类的数据源选择为 `custom`，或单独覆盖
+`get_news`、`get_global_news` 等后端数据方法，然后为该分类填写 Base URL 和
+endpoint path。WebUI 会发起：
 
 ```http
 POST {baseUrl}{endpoint}
@@ -194,6 +230,24 @@ Authorization: Bearer CUSTOM_DATA_API_KEY
 ```
 
 响应可以是纯文本、JSON，或带顶层 `data` 字段的 JSON。
+
+### 并行与回测观察
+
+当前上游 TradingAgents 图里，分析师节点按固定顺序运行，随后研究辩论、交易员、
+风控辩论也都有上下文依赖。因此 WebUI v1 最稳妥的提速方式是多股票并行运行：
+把 `股票并行数` 设为 2-8 后，后端会用多个 worker 同时处理不同股票。
+
+Settings 页面还提供按智能体的 LLM 路由。四个初始分析师被标记为“可并行”，方便后续
+做图内 fan-out；辩论、交易员和风控节点保持顺序执行，但仍可分配独立 API Key，
+用于分摊供应商限流。
+
+`回测观察` 标签会把完成报告拆成复盘清单：必须先触达到入场条件，之后才统计止损、
+目标价和风险条件是否命中。它不改 TradingAgents 后端策略逻辑，只为后续自动回测
+准备稳定的观察面。
+
+WebUI 没有默认加入任意 SOCKS5/HTTP 代理字段，因为代理端可能看到提示词、报告内容
+和 API Key。需要可信网络路由时，建议把某个路由的 `Base URL` 指向你自己控制的
+OpenAI-compatible 网关或供应商侧代理。
 
 ### 开源协议
 

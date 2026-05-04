@@ -18,12 +18,28 @@ export type Metadata = {
   languages: Option[];
   dataVendorCategories: Array<{ key: string; label: string; options: string[] }>;
   customDataMethods: Array<{ method: string; category: string; label: string; defaultPath: string }>;
+  llmRouteTargets: Array<{
+    key: string;
+    label: string;
+    stage: string;
+    defaultModelRole: 'quick' | 'deep';
+    parallelizable: boolean;
+    apiKeyField: string;
+    description: string;
+  }>;
   secretFields: string[];
 };
 
 export type CustomDataInterface = {
   baseUrl: string | null;
   endpoints: Record<string, string>;
+};
+
+export type LLMRouteConfig = {
+  enabled: boolean;
+  provider: string | null;
+  backendUrl: string | null;
+  modelId: string | null;
 };
 
 export type WebConfig = {
@@ -41,7 +57,10 @@ export type WebConfig = {
   anthropicEffort: string | null;
   checkpointEnabled: boolean;
   maxRecurLimit: number;
+  maxParallelRuns: number;
   dataVendors: Record<string, string>;
+  toolVendors: Record<string, string>;
+  llmRoutes: Record<string, LLMRouteConfig>;
   customDataInterfaces: Record<string, CustomDataInterface>;
 };
 
@@ -49,7 +68,7 @@ export type SecretStatus = Record<string, { configured: boolean; masked: string 
 
 export type RunInfo = {
   id: string;
-  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
   ticker: string;
   analysisDate: string;
   submittedAt: string;
@@ -58,6 +77,14 @@ export type RunInfo = {
   error?: string | null;
   decision?: string | null;
   stats: Record<string, number>;
+};
+
+export type BatchRunResponse = {
+  runs: RunInfo[];
+};
+
+export type RunListResponse = {
+  runs: RunInfo[];
 };
 
 export type RunEvent = {
@@ -78,7 +105,7 @@ export type ReportHistoryItem = {
   runId: string;
   ticker: string;
   analysisDate: string;
-  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
   submittedAt: string;
   endedAt?: string | null;
   decision?: string | null;

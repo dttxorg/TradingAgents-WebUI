@@ -27,7 +27,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -167,6 +168,11 @@ h2 {
   border-color: #6d3437;
 }
 
+.run-pill.cancelled {
+  color: #d5c7a1;
+  border-color: #6a5b32;
+}
+
 .primary,
 .secondary {
   height: 38px;
@@ -189,6 +195,12 @@ h2 {
   color: #e7eeee;
   background: #182225;
   border-color: #2a3b40;
+}
+
+.secondary.danger {
+  color: #ffd1cf;
+  border-color: #744245;
+  background: #241718;
 }
 
 .full {
@@ -298,7 +310,8 @@ h2 {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   min-height: 38px;
   border-radius: 8px;
@@ -311,9 +324,27 @@ select {
 
 input:focus,
 select:focus,
+textarea:focus,
 button:focus-visible {
   border-color: #83e4b9;
   box-shadow: 0 0 0 3px rgba(131, 228, 185, 0.14);
+}
+
+textarea {
+  min-height: 74px;
+  padding: 9px 10px;
+  resize: vertical;
+}
+
+.ticker-list-field {
+  grid-column: span 2;
+}
+
+.ticker-list-field small {
+  color: #78898c;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.45;
 }
 
 .tool-row {
@@ -401,6 +432,108 @@ button:focus-visible {
   gap: 10px;
 }
 
+.route-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.route-card {
+  border: 1px solid #25373c;
+  background: #0c1215;
+  border-radius: 8px;
+  padding: 10px;
+  opacity: 0.82;
+}
+
+.route-card.active {
+  border-color: #4c8e77;
+  opacity: 1;
+}
+
+.route-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.route-card-head > div {
+  display: grid;
+  gap: 2px;
+}
+
+.route-card-head strong {
+  color: #eef5f4;
+  font-size: 13px;
+}
+
+.route-card-head small {
+  color: #83e4b9;
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.mini-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #d4dedf;
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.mini-toggle input {
+  width: 16px;
+  min-height: 16px;
+}
+
+.route-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.route-secret {
+  align-self: end;
+}
+
+.recommendation-list,
+.method-vendor-list,
+.batch-list {
+  display: grid;
+  gap: 8px;
+}
+
+.recommendation-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid #3e4632;
+  background: #181a10;
+  color: #e5e0b8;
+  border-radius: 8px;
+  padding: 8px 9px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.recommendation-row svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.method-vendor-row span {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.method-vendor-row small {
+  color: #708083;
+  font-weight: 650;
+}
+
 .custom-interface {
   border: 1px solid #25373c;
   background: #0c1215;
@@ -447,6 +580,51 @@ button:focus-visible {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
+}
+
+.batch-queue {
+  margin-top: 12px;
+}
+
+.batch-list {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.batch-chip {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid #293b40;
+  background: #10181b;
+  border-radius: 8px;
+  padding: 7px 9px;
+  color: #dce5e6;
+  font-size: 12px;
+  font-weight: 740;
+}
+
+.batch-chip small {
+  color: #8fa0a2;
+  font-size: 11px;
+}
+
+.batch-chip.running {
+  border-color: #225b76;
+  background: #10212a;
+}
+
+.batch-chip.succeeded {
+  border-color: #2b6b52;
+}
+
+.batch-chip.failed {
+  border-color: #6d3437;
+}
+
+.batch-chip.cancelled {
+  border-color: #6a5b32;
 }
 
 .agent {
@@ -620,6 +798,7 @@ button:focus-visible {
 
 .report-context {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
   border: 1px solid #25373c;
@@ -647,6 +826,18 @@ button:focus-visible {
   font-weight: 700;
 }
 
+.text-button {
+  min-height: 28px;
+  border: 1px solid #2a3b40;
+  background: #10181b;
+  color: #dce5e6;
+  border-radius: 8px;
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 720;
+  white-space: nowrap;
+}
+
 .report-view {
   min-height: 440px;
   max-height: 620px;
@@ -664,6 +855,51 @@ button:focus-visible {
   color: #d8e1e2;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
+}
+
+.observation-view {
+  display: grid;
+  gap: 12px;
+}
+
+.observation-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.observation-card,
+.observation-section {
+  border: 1px solid #25373c;
+  background: #10181b;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.observation-card span,
+.observation-section h3 {
+  display: block;
+  margin: 0 0 6px;
+  color: #83e4b9;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.observation-card p {
+  margin: 0;
+  color: #d8e1e2;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.observation-section ol,
+.observation-section ul {
+  margin: 0;
+  padding-left: 20px;
+  color: #d8e1e2;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .empty {
@@ -707,10 +943,17 @@ button:focus-visible {
   .advanced-grid,
   .tool-row,
   .settings-form,
-  .settings-model-row,
-  .agent-grid,
-  .metrics-row,
-  .endpoint-grid {
+    .settings-model-row,
+    .agent-grid,
+    .metrics-row,
+    .endpoint-grid,
+    .batch-list,
+    .route-fields,
+    .observation-grid {
     grid-template-columns: 1fr;
+  }
+
+  .ticker-list-field {
+    grid-column: span 1;
   }
 }

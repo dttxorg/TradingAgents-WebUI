@@ -269,6 +269,119 @@ CUSTOM_DATA_METHODS = [
     {"method": "get_insider_transactions", "category": "news_data", "label": "Insider transactions", "defaultPath": "/insider-transactions"},
 ]
 
+LLM_ROUTE_TARGETS = [
+    {
+        "key": "market_analyst",
+        "label": "Market Analyst",
+        "stage": "analyst",
+        "defaultModelRole": "quick",
+        "parallelizable": True,
+        "apiKeyField": "TRADINGAGENTS_MARKET_LLM_API_KEY",
+        "description": "Independent initial market analysis; safe candidate for future fan-out execution.",
+    },
+    {
+        "key": "social_analyst",
+        "label": "Social Analyst",
+        "stage": "analyst",
+        "defaultModelRole": "quick",
+        "parallelizable": True,
+        "apiKeyField": "TRADINGAGENTS_SOCIAL_LLM_API_KEY",
+        "description": "Independent initial sentiment analysis; safe candidate for future fan-out execution.",
+    },
+    {
+        "key": "news_analyst",
+        "label": "News Analyst",
+        "stage": "analyst",
+        "defaultModelRole": "quick",
+        "parallelizable": True,
+        "apiKeyField": "TRADINGAGENTS_NEWS_LLM_API_KEY",
+        "description": "Independent initial news analysis; safe candidate for future fan-out execution.",
+    },
+    {
+        "key": "fundamentals_analyst",
+        "label": "Fundamentals Analyst",
+        "stage": "analyst",
+        "defaultModelRole": "quick",
+        "parallelizable": True,
+        "apiKeyField": "TRADINGAGENTS_FUNDAMENTALS_LLM_API_KEY",
+        "description": "Independent initial fundamentals analysis; safe candidate for future fan-out execution.",
+    },
+    {
+        "key": "bull_researcher",
+        "label": "Bull Researcher",
+        "stage": "research",
+        "defaultModelRole": "quick",
+        "parallelizable": False,
+        "apiKeyField": "TRADINGAGENTS_BULL_LLM_API_KEY",
+        "description": "Debate turn depends on prior context; route only for rate-limit isolation.",
+    },
+    {
+        "key": "bear_researcher",
+        "label": "Bear Researcher",
+        "stage": "research",
+        "defaultModelRole": "quick",
+        "parallelizable": False,
+        "apiKeyField": "TRADINGAGENTS_BEAR_LLM_API_KEY",
+        "description": "Debate turn depends on prior context; route only for rate-limit isolation.",
+    },
+    {
+        "key": "research_manager",
+        "label": "Research Manager",
+        "stage": "research",
+        "defaultModelRole": "deep",
+        "parallelizable": False,
+        "apiKeyField": "TRADINGAGENTS_RESEARCH_MANAGER_LLM_API_KEY",
+        "description": "Summarizes debate output and should remain after bull/bear turns.",
+    },
+    {
+        "key": "trader",
+        "label": "Trader",
+        "stage": "trading",
+        "defaultModelRole": "quick",
+        "parallelizable": False,
+        "apiKeyField": "TRADINGAGENTS_TRADER_LLM_API_KEY",
+        "description": "Depends on the research manager plan.",
+    },
+    {
+        "key": "aggressive_analyst",
+        "label": "Aggressive Risk Analyst",
+        "stage": "risk",
+        "defaultModelRole": "quick",
+        "parallelizable": False,
+        "apiKeyField": "TRADINGAGENTS_AGGRESSIVE_LLM_API_KEY",
+        "description": "Risk debate is sequential; route only for rate-limit isolation.",
+    },
+    {
+        "key": "conservative_analyst",
+        "label": "Conservative Risk Analyst",
+        "stage": "risk",
+        "defaultModelRole": "quick",
+        "parallelizable": False,
+        "apiKeyField": "TRADINGAGENTS_CONSERVATIVE_LLM_API_KEY",
+        "description": "Risk debate is sequential; route only for rate-limit isolation.",
+    },
+    {
+        "key": "neutral_analyst",
+        "label": "Neutral Risk Analyst",
+        "stage": "risk",
+        "defaultModelRole": "quick",
+        "parallelizable": False,
+        "apiKeyField": "TRADINGAGENTS_NEUTRAL_LLM_API_KEY",
+        "description": "Risk debate is sequential; route only for rate-limit isolation.",
+    },
+    {
+        "key": "portfolio_manager",
+        "label": "Portfolio Manager",
+        "stage": "risk",
+        "defaultModelRole": "deep",
+        "parallelizable": False,
+        "apiKeyField": "TRADINGAGENTS_PORTFOLIO_MANAGER_LLM_API_KEY",
+        "description": "Final decision depends on the completed risk debate.",
+    },
+]
+
+LLM_ROUTE_SECRET_FIELDS = [item["apiKeyField"] for item in LLM_ROUTE_TARGETS]
+
 SECRET_FIELDS = [
     "OPENAI_API_KEY",
     "GOOGLE_API_KEY",
@@ -296,7 +409,7 @@ SECRET_FIELDS = [
     "TOGETHER_API_KEY",
     "FIREWORKS_API_KEY",
     "PERPLEXITY_API_KEY",
-]
+] + LLM_ROUTE_SECRET_FIELDS
 
 EXTRA_MODEL_OPTIONS = {
     "moonshot": ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"],
@@ -368,5 +481,6 @@ def metadata_payload() -> dict[str, Any]:
         "languages": OUTPUT_LANGUAGES,
         "dataVendorCategories": DATA_VENDOR_CATEGORIES,
         "customDataMethods": CUSTOM_DATA_METHODS,
+        "llmRouteTargets": LLM_ROUTE_TARGETS,
         "secretFields": SECRET_FIELDS,
     }

@@ -52,6 +52,17 @@ def test_storage_masks_and_never_returns_plain_secret(tmp_path):
     assert mask_secret("short") == "sh...t"
 
 
+def test_storage_reports_environment_secret_status(monkeypatch, tmp_path):
+    monkeypatch.setenv("MOONSHOT_API_KEY", "env-moonshot-secret")
+    storage = WebStorage(tmp_path)
+
+    status = storage.secret_status()
+
+    assert storage.load_secrets()["MOONSHOT_API_KEY"] == "env-moonshot-secret"
+    assert status["MOONSHOT_API_KEY"].configured is True
+    assert status["MOONSHOT_API_KEY"].masked == "env-...cret"
+
+
 def test_storage_persists_report_history(tmp_path):
     storage = WebStorage(tmp_path)
     config = WebConfig(ticker="SPY", analysisDate=date.today(), analysts=["market"], outputLanguage="Chinese")
@@ -130,6 +141,71 @@ def test_custom_data_interfaces_validate_selected_categories():
                 }
             }
         )
+
+
+def test_tool_vendors_validate_method_level_data_routes(tmp_path):
+    config = WebConfig(toolVendors={"get_news": "alpha_vantage"})
+
+    assert config.tool_vendors == {"get_news": "alpha_vantage"}
+
+    storage = WebStorage(tmp_path)
+    runtime_config = storage.runtime_config(config)
+    assert runtime_config["tool_vendors"] == {"get_news": "alpha_vantage"}
+
+    with pytest.raises(ValidationError):
+        WebConfig(toolVendors={"get_unknown": "alpha_vantage"})
+
+    with pytest.raises(ValidationError):
+        WebConfig(toolVendors={"get_news": "unsupported_vendor"})
+
+
+def test_tool_vendor_custom_requires_category_base_url():
+    with pytest.raises(ValidationError):
+        WebConfig(toolVendors={"get_global_news": CUSTOM_DATA_VENDOR})
+
+    config = WebConfig(
+        toolVendors={"get_global_news": CUSTOM_DATA_VENDOR},
+        customDataInterfaces={
+            "news_data": {
+                "baseUrl": "https://data.example.com",
+                "endpoints": {"get_global_news": "/global"},
+            }
+        },
+    )
+
+    assert config.tool_vendors["get_global_news"] == CUSTOM_DATA_VENDOR
+    assert config.custom_data_interfaces["news_data"].base_url == "https://data.example.com"
+
+
+def test_llm_routes_validate_and_persist_runtime_config(tmp_path):
+    config = WebConfig(
+        maxParallelRuns=3,
+        llmRoutes={
+            "market_analyst": {
+                "enabled": True,
+                "provider": "moonshot",
+                "backendUrl": "https://api.moonshot.cn/v1",
+                "modelId": "moonshot-v1-8k",
+            }
+        }
+    )
+
+    storage = WebStorage(tmp_path)
+    runtime_config = storage.runtime_config(config)
+
+    assert runtime_config["llm_routes"]["market_analyst"]["enabled"] is True
+    assert runtime_config["llm_routes"]["market_analyst"]["provider"] == "moonshot"
+    assert runtime_config["llm_routes"]["market_analyst"]["modelId"] == "moonshot-v1-8k"
+    assert runtime_config["max_parallel_runs"] == 3
+
+    with pytest.raises(ValidationError):
+        WebConfig(llmRoutes={"unknown_agent": {"enabled": True}})
+
+    with pytest.raises(ValidationError):
+        WebConfig(llmRoutes={"market_analyst": {"enabled": True, "provider": "not-a-provider"}})
+
+    with pytest.raises(ValidationError):
+        WebConfig(maxParallelRuns=0)
 
 
 def test_custom_data_vendor_posts_to_configured_endpoint(monkeypatch):
@@ -240,6 +316,29 @@ def test_model_fetch_endpoint_uses_saved_secret(monkeypatch, tmp_path):
     assert payload["models"] == [{"label": "moonshot-v1-8k", "value": "moonshot-v1-8k"}]
 
 
+def test_model_fetch_endpoint_uses_environment_secret(monkeypatch, tmp_path):
+    storage = WebStorage(tmp_path)
+    monkeypatch.setattr(app_module, "storage", storage)
+    monkeypatch.setenv("MOONSHOT_API_KEY", "env-moonshot-key")
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": [{"id": "moonshot-v1-32k"}]}
+
+    monkeypatch.setattr("web.backend.model_discovery.requests.get", lambda *args, **kwargs: FakeResponse())
+    client = TestClient(app)
+
+    payload = client.post(
+        "/api/models/fetch",
+        json={"provider": "moonshot", "baseUrl": "https://api.moonshot.cn/v1"},
+    ).json()
+
+    assert payload["models"] == [{"label": "moonshot-v1-32k", "value": "moonshot-v1-32k"}]
+
+
 def test_run_manager_rejects_custom_openai_without_secret(tmp_path):
     storage = WebStorage(tmp_path)
     manager = RunManager(storage)
@@ -272,6 +371,102 @@ def test_health_and_metadata_endpoints():
 
     assert client.get("/api/health").json() == {"status": "ok"}
     assert client.get("/api/metadata").status_code == 200
+
+
+def test_batch_run_endpoint_queues_runs_in_order(monkeypatch, tmp_path):
+    class FakeRun:
+        def __init__(self, run_id, ticker, analysis_date):
+            self.run_id = run_id
+            self.ticker = ticker
+            self.analysis_date = analysis_date
+
+        def info(self):
+            return RunInfo(
+                id=self.run_id,
+                status="queued",
+                ticker=self.ticker,
+                analysisDate=self.analysis_date,
+                submittedAt=datetime(2026, 5, 1, 8, 0, tzinfo=timezone.utc),
+            )
+
+    class FakeRunManager:
+        def create_batch_runs(self, request):
+            return [
+                FakeRun(f"33333333-3333-4333-8333-33333333333{index}", ticker, request.analysis_date)
+                for index, ticker in enumerate(request.tickers)
+            ]
+
+    monkeypatch.setattr(app_module, "run_manager", FakeRunManager())
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/runs/batch",
+        json={
+            "tickers": ["SPY", " 0700.hk ", "SPY"],
+            "analysisDate": str(date.today()),
+            "config": WebConfig(ticker="SPY", analysisDate=date.today(), analysts=["market"]).model_dump(mode="json", by_alias=True),
+        },
+    )
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert [item["ticker"] for item in payload["runs"]] == ["SPY", "0700.HK"]
+
+
+def test_run_list_endpoint_returns_active_runs(monkeypatch):
+    run = RunInfo(
+        id="44444444-4444-4444-8444-444444444444",
+        status="running",
+        ticker="SPY",
+        analysisDate=date.today(),
+        submittedAt=datetime(2026, 5, 1, 8, 0, tzinfo=timezone.utc),
+    )
+
+    class FakeRun:
+        def info(self):
+            return run
+
+    class FakeRunManager:
+        def list_runs(self, active_only=False, limit=100):
+            assert active_only is True
+            assert limit == 100
+            return [FakeRun()]
+
+    monkeypatch.setattr(app_module, "run_manager", FakeRunManager())
+    client = TestClient(app)
+
+    payload = client.get("/api/runs?activeOnly=true").json()
+
+    assert payload["runs"][0]["id"] == run.id
+    assert payload["runs"][0]["status"] == "running"
+
+
+def test_cancel_run_endpoint_returns_cancelled_run(monkeypatch):
+    run = RunInfo(
+        id="55555555-5555-4555-8555-555555555555",
+        status="cancelled",
+        ticker="SPY",
+        analysisDate=date.today(),
+        submittedAt=datetime(2026, 5, 1, 8, 0, tzinfo=timezone.utc),
+        endedAt=datetime(2026, 5, 1, 8, 1, tzinfo=timezone.utc),
+    )
+
+    class FakeRun:
+        def info(self):
+            return run
+
+    class FakeRunManager:
+        def cancel_run(self, run_id):
+            assert run_id == run.id
+            return FakeRun()
+
+    monkeypatch.setattr(app_module, "run_manager", FakeRunManager())
+    client = TestClient(app)
+
+    payload = client.post(f"/api/runs/{run.id}/cancel").json()
+
+    assert payload["id"] == run.id
+    assert payload["status"] == "cancelled"
 
 
 def test_report_history_endpoints(monkeypatch, tmp_path):
