@@ -354,6 +354,38 @@ button:focus-visible {
   margin-bottom: 12px;
 }
 
+.hint {
+  margin: 0 0 10px;
+  color: #8fa0a2;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.custom-interface-list {
+  display: grid;
+  gap: 10px;
+}
+
+.custom-interface {
+  border: 1px solid #25373c;
+  background: #0c1215;
+  border-radius: 8px;
+  padding: 10px;
+  opacity: 0.78;
+}
+
+.custom-interface.active {
+  border-color: #4c8e77;
+  opacity: 1;
+}
+
+.endpoint-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
 .secret-row {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -538,7 +570,8 @@ button:focus-visible {
   .advanced-grid,
   .tool-row,
   .agent-grid,
-  .metrics-row {
+  .metrics-row,
+  .endpoint-grid {
     grid-template-columns: 1fr;
   }
 }

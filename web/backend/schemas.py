@@ -3,12 +3,12 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from cli.utils import normalize_ticker_symbol
 from tradingagents.default_config import DEFAULT_CONFIG
 
-from .constants import DATA_VENDOR_CATEGORIES, PROVIDERS, analyst_options
+from .constants import CUSTOM_DATA_METHODS, CUSTOM_DATA_VENDOR, CUSTOM_OPENAI_PROVIDER, DATA_VENDOR_CATEGORIES, PROVIDERS, analyst_options
 
 
 def to_camel(value: str) -> str:
@@ -24,6 +24,20 @@ def _default_data_vendors() -> dict[str, str]:
     return dict(DEFAULT_CONFIG["data_vendors"])
 
 
+def _default_custom_data_interfaces() -> dict[str, dict[str, Any]]:
+    return {
+        item["key"]: {
+            "baseUrl": None,
+            "endpoints": {
+                method["method"]: method["defaultPath"]
+                for method in CUSTOM_DATA_METHODS
+                if method["category"] == item["key"]
+            },
+        }
+        for item in DATA_VENDOR_CATEGORIES
+    }
+
+
 def _allowed_values(items: list[dict[str, Any]], key: str = "value") -> set[Any]:
     return {item[key] for item in items}
 
@@ -31,9 +45,39 @@ def _allowed_values(items: list[dict[str, Any]], key: str = "value") -> set[Any]
 ALLOWED_ANALYSTS = _allowed_values(analyst_options())
 ALLOWED_PROVIDERS = _allowed_values(PROVIDERS)
 ALLOWED_VENDOR_KEYS = {item["key"] for item in DATA_VENDOR_CATEGORIES}
-ALLOWED_VENDOR_VALUES = {
-    option for item in DATA_VENDOR_CATEGORIES for option in item["options"]
+ALLOWED_VENDOR_OPTIONS_BY_KEY = {
+    item["key"]: set(item["options"]) for item in DATA_VENDOR_CATEGORIES
 }
+CUSTOM_METHODS_BY_CATEGORY = {
+    category: {method["method"] for method in CUSTOM_DATA_METHODS if method["category"] == category}
+    for category in ALLOWED_VENDOR_KEYS
+}
+
+
+class CustomDataInterfaceConfig(APIModel):
+    base_url: str | None = None
+    endpoints: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip().rstrip("/")
+        return cleaned or None
+
+    @field_validator("endpoints")
+    @classmethod
+    def validate_endpoints(cls, value: dict[str, str]) -> dict[str, str]:
+        allowed = {item["method"] for item in CUSTOM_DATA_METHODS}
+        endpoints = {}
+        for method, path in value.items():
+            if method not in allowed:
+                raise ValueError(f"Unsupported custom data method: {method}")
+            cleaned = path.strip() if isinstance(path, str) else ""
+            if cleaned:
+                endpoints[method] = cleaned if cleaned.startswith("/") else f"/{cleaned}"
+        return endpoints
 
 
 class WebConfig(APIModel):
@@ -52,6 +96,12 @@ class WebConfig(APIModel):
     checkpoint_enabled: bool = DEFAULT_CONFIG["checkpoint_enabled"]
     max_recur_limit: int = DEFAULT_CONFIG["max_recur_limit"]
     data_vendors: dict[str, str] = Field(default_factory=_default_data_vendors)
+    custom_data_interfaces: dict[str, CustomDataInterfaceConfig] = Field(
+        default_factory=lambda: {
+            key: CustomDataInterfaceConfig.model_validate(value)
+            for key, value in _default_custom_data_interfaces().items()
+        }
+    )
 
     @field_validator("ticker")
     @classmethod
@@ -75,6 +125,22 @@ class WebConfig(APIModel):
         if not language:
             raise ValueError("Output language is required.")
         return language
+
+    @field_validator("backend_url")
+    @classmethod
+    def validate_backend_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip().rstrip("/")
+        return cleaned or None
+
+    @field_validator("quick_think_llm", "deep_think_llm")
+    @classmethod
+    def validate_model_id(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Model ID is required.")
+        return cleaned
 
     @field_validator("analysts")
     @classmethod
@@ -105,10 +171,38 @@ class WebConfig(APIModel):
         for key, vendor in value.items():
             if key not in ALLOWED_VENDOR_KEYS:
                 raise ValueError(f"Unsupported data vendor category: {key}")
-            if vendor not in ALLOWED_VENDOR_VALUES:
+            if vendor not in ALLOWED_VENDOR_OPTIONS_BY_KEY[key]:
                 raise ValueError(f"Unsupported data vendor: {vendor}")
             vendors[key] = vendor
         return vendors
+
+    @model_validator(mode="after")
+    def validate_custom_interfaces(self) -> "WebConfig":
+        if self.llm_provider == CUSTOM_OPENAI_PROVIDER and not self.backend_url:
+            raise ValueError("Custom OpenAI-compatible provider requires a Base URL.")
+
+        merged = {
+            key: CustomDataInterfaceConfig.model_validate(value)
+            for key, value in _default_custom_data_interfaces().items()
+        }
+        for key, value in self.custom_data_interfaces.items():
+            if key not in ALLOWED_VENDOR_KEYS:
+                raise ValueError(f"Unsupported custom data interface category: {key}")
+            unsupported = set(value.endpoints) - CUSTOM_METHODS_BY_CATEGORY[key]
+            if unsupported:
+                methods = ", ".join(sorted(unsupported))
+                raise ValueError(f"Unsupported custom data method for {key}: {methods}")
+            merged[key] = CustomDataInterfaceConfig(
+                base_url=value.base_url,
+                endpoints={**merged[key].endpoints, **value.endpoints},
+            )
+
+        for key, vendor in self.data_vendors.items():
+            if vendor == CUSTOM_DATA_VENDOR and not merged[key].base_url:
+                raise ValueError(f"Custom data interface for {key} requires a Base URL.")
+
+        self.custom_data_interfaces = merged
+        return self
 
 
 class SecretsUpdate(APIModel):

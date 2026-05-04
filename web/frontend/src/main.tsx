@@ -32,7 +32,7 @@ const messages = {
     eyebrow: 'TradingAgents Web Console',
     title: 'Multi-agent market research workspace',
     runAnalysis: 'Run analysis',
-    connections: 'Connections',
+    connections: 'Settings / API keys',
     notConfigured: 'Not configured',
     replaceValue: 'Replace value',
     pasteKey: 'Paste key',
@@ -49,6 +49,7 @@ const messages = {
     depth: 'Depth',
     outputLanguage: 'Output language',
     customLanguage: 'Custom language',
+    customModelId: 'Custom model ID',
     analysts: 'Analysts',
     openaiReasoning: 'OpenAI reasoning',
     geminiThinking: 'Gemini thinking',
@@ -63,6 +64,11 @@ const messages = {
     runId: 'Run ID',
     eventStream: 'Event stream',
     eventsEmpty: 'Live graph events will appear here.',
+    customInterfaces: 'Settings / Custom APIs',
+    customOpenAiHint: 'OpenAI-compatible Base URL, model IDs, and CUSTOM_OPENAI_API_KEY.',
+    customDataHint: 'Choose custom as a data vendor, then point that category at an HTTP service.',
+    endpointPath: 'Endpoint path',
+    baseUrlRequired: 'Base URL for selected custom data categories',
     reports: 'Reports',
     final: 'Final',
     noReport: 'No report yet.',
@@ -81,7 +87,7 @@ const messages = {
     eyebrow: 'TradingAgents Web 控制台',
     title: '多智能体金融市场研究工作台',
     runAnalysis: '开始分析',
-    connections: '连接与密钥',
+    connections: '设置 / API 密钥',
     notConfigured: '未配置',
     replaceValue: '替换当前值',
     pasteKey: '粘贴密钥',
@@ -98,6 +104,7 @@ const messages = {
     depth: '研究深度',
     outputLanguage: '报告输出语言',
     customLanguage: '自定义语言',
+    customModelId: '自定义模型 ID',
     analysts: '分析师团队',
     openaiReasoning: 'OpenAI 推理强度',
     geminiThinking: 'Gemini 思考模式',
@@ -112,6 +119,11 @@ const messages = {
     runId: '运行 ID',
     eventStream: '事件流',
     eventsEmpty: '实时图执行事件会显示在这里。',
+    customInterfaces: '设置 / 自定义接口',
+    customOpenAiHint: 'OpenAI-compatible Base URL、模型 ID 和 CUSTOM_OPENAI_API_KEY。',
+    customDataHint: '将数据源选择为 custom 后，把对应分类指向你的 HTTP 数据服务。',
+    endpointPath: '接口路径',
+    baseUrlRequired: '已选择 custom 的数据分类需要填写 Base URL',
     reports: '报告',
     final: '最终报告',
     noReport: '暂无报告。',
@@ -144,6 +156,21 @@ const dataVendorLabels: Record<Locale, Record<string, string>> = {
     technical_indicators: '技术指标',
     fundamental_data: '基本面数据',
     news_data: '新闻数据',
+  },
+};
+
+const customMethodLabels: Record<Locale, Record<string, string>> = {
+  en: {},
+  zh: {
+    get_stock_data: '股票价格',
+    get_indicators: '技术指标',
+    get_fundamentals: '基本面摘要',
+    get_balance_sheet: '资产负债表',
+    get_cashflow: '现金流量表',
+    get_income_statement: '利润表',
+    get_news: '个股新闻',
+    get_global_news: '全球新闻',
+    get_insider_transactions: '内部交易',
   },
 };
 
@@ -200,6 +227,7 @@ const emptyMetadata: Metadata = {
   models: {},
   languages: [],
   dataVendorCategories: [],
+  customDataMethods: [],
   secretFields: [],
 };
 
@@ -232,7 +260,7 @@ function App() {
   useEffect(() => {
     Promise.all([api.metadata(), api.config(), api.secretStatus()])
       .then(([metadataValue, configValue, secretValue]) => {
-        setMetadata(metadataValue);
+        setMetadata({ ...emptyMetadata, ...metadataValue });
         setConfig(configValue);
         setSecretStatus(secretValue);
       })
@@ -250,6 +278,7 @@ function App() {
   );
 
   const providerModels = config ? metadata.models[config.llmProvider] : undefined;
+  const isCustomOpenAi = config?.llmProvider === 'custom_openai';
 
   function updateConfig<K extends keyof WebConfig>(key: K, value: WebConfig[K]) {
     setConfig((current) => (current ? { ...current, [key]: value } : current));
@@ -266,6 +295,27 @@ function App() {
   function updateVendor(key: string, value: string) {
     if (!config) return;
     updateConfig('dataVendors', { ...config.dataVendors, [key]: value });
+  }
+
+  function updateCustomDataBaseUrl(category: string, value: string) {
+    if (!config) return;
+    const current = config.customDataInterfaces[category] ?? { baseUrl: null, endpoints: {} };
+    updateConfig('customDataInterfaces', {
+      ...config.customDataInterfaces,
+      [category]: { ...current, baseUrl: value || null },
+    });
+  }
+
+  function updateCustomDataEndpoint(category: string, method: string, value: string) {
+    if (!config) return;
+    const current = config.customDataInterfaces[category] ?? { baseUrl: null, endpoints: {} };
+    updateConfig('customDataInterfaces', {
+      ...config.customDataInterfaces,
+      [category]: {
+        ...current,
+        endpoints: { ...current.endpoints, [method]: value },
+      },
+    });
   }
 
   async function saveConfig() {
@@ -485,20 +535,43 @@ function App() {
             </div>
 
             <div className="tool-row">
-              <Selector
-                icon={<Brain size={16} />}
-                label={t.quickModel}
-                value={config.quickThinkLlm}
-                options={providerModels?.quick ?? []}
-                onChange={(value) => updateConfig('quickThinkLlm', value)}
-              />
-              <Selector
-                icon={<Bot size={16} />}
-                label={t.deepModel}
-                value={config.deepThinkLlm}
-                options={providerModels?.deep ?? []}
-                onChange={(value) => updateConfig('deepThinkLlm', value)}
-              />
+              {isCustomOpenAi ? (
+                <>
+                  <label className="field">
+                    <span>{t.quickModel}</span>
+                    <input
+                      value={config.quickThinkLlm}
+                      onChange={(event) => updateConfig('quickThinkLlm', event.target.value)}
+                      placeholder={t.customModelId}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>{t.deepModel}</span>
+                    <input
+                      value={config.deepThinkLlm}
+                      onChange={(event) => updateConfig('deepThinkLlm', event.target.value)}
+                      placeholder={t.customModelId}
+                    />
+                  </label>
+                </>
+              ) : (
+                <>
+                  <Selector
+                    icon={<Brain size={16} />}
+                    label={t.quickModel}
+                    value={config.quickThinkLlm}
+                    options={providerModels?.quick ?? []}
+                    onChange={(value) => updateConfig('quickThinkLlm', value)}
+                  />
+                  <Selector
+                    icon={<Bot size={16} />}
+                    label={t.deepModel}
+                    value={config.deepThinkLlm}
+                    options={providerModels?.deep ?? []}
+                    onChange={(value) => updateConfig('deepThinkLlm', value)}
+                  />
+                </>
+              )}
               <Selector
                 icon={<Gauge size={16} />}
                 label={t.depth}
@@ -609,6 +682,43 @@ function App() {
               <Metric label={t.elapsed} value={`${progress?.elapsedSeconds ?? 0}s`} />
               <Metric label={t.runId} value={activeRun?.id.slice(0, 8) ?? '-'} />
             </div>
+          </Panel>
+
+          <Panel title={t.customInterfaces} icon={<Server size={17} />}>
+            <p className="hint">{t.customOpenAiHint}</p>
+            <p className="hint">{t.customDataHint}</p>
+            <div className="custom-interface-list">
+              {metadata.dataVendorCategories.map((category) => {
+                const selectedCustom = config.dataVendors[category.key] === 'custom';
+                const settings = config.customDataInterfaces[category.key] ?? { baseUrl: null, endpoints: {} };
+                const methods = metadata.customDataMethods.filter((method) => method.category === category.key);
+                return (
+                  <section key={category.key} className={selectedCustom ? 'custom-interface active' : 'custom-interface'}>
+                    <label className="field">
+                      <span>{dataVendorLabels[locale][category.key] ?? category.label}</span>
+                      <input
+                        value={settings.baseUrl ?? ''}
+                        onChange={(event) => updateCustomDataBaseUrl(category.key, event.target.value)}
+                        placeholder="https://data.example.com"
+                      />
+                    </label>
+                    <div className="endpoint-grid">
+                      {methods.map((method) => (
+                        <label key={method.method} className="field">
+                          <span>{customMethodLabels[locale][method.method] ?? method.label}</span>
+                          <input
+                            value={settings.endpoints[method.method] ?? method.defaultPath}
+                            onChange={(event) => updateCustomDataEndpoint(category.key, method.method, event.target.value)}
+                            placeholder={t.endpointPath}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+            <p className="hint">{t.baseUrlRequired}</p>
           </Panel>
         </section>
 

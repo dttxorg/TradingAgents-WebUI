@@ -19,6 +19,7 @@ instead of being hard-coded in the React app.
 - Secret entry with masked status only; API keys are not returned to the browser
 - Queued single-run execution with Server-Sent Events for live progress
 - Report tabs for agent output, final report, stats, and decision
+- Custom OpenAI-compatible LLM endpoints and custom HTTP data interfaces
 - English and Chinese WebUI with a persistent language switch
 - Docker Compose runtime with persistent logs, cache, memory, secrets, and WebUI
   settings
@@ -54,6 +55,34 @@ metadata from `/api/metadata`. When upstream TradingAgents adds or renames
 runtime options, update the backend metadata/adapter layer first; the frontend
 will continue rendering most option changes without code changes.
 
+### Custom Interfaces
+
+To use an OpenAI-compatible gateway, select `Custom OpenAI-compatible` in the
+settings, enter the gateway Base URL, set the quick/deep model IDs, and save
+`CUSTOM_OPENAI_API_KEY` in the API key panel. This works for gateways that
+implement the OpenAI Chat Completions API.
+
+To use a custom data service, choose `custom` for one or more data vendor
+categories and set that category's Base URL and endpoint paths. The WebUI calls:
+
+```http
+POST {baseUrl}{endpoint}
+Content-Type: application/json
+Authorization: Bearer CUSTOM_DATA_API_KEY
+```
+
+Payload:
+
+```json
+{
+  "method": "get_news",
+  "args": ["SPY"],
+  "kwargs": { "curr_date": "2026-05-01" }
+}
+```
+
+The response may be plain text, JSON, or JSON with a top-level `data` field.
+
 ### License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE).
@@ -76,6 +105,7 @@ TradingAgents-WebUI 是一个面向
 - API Key 只支持写入和掩码状态展示，不会向浏览器返回明文密钥
 - 单任务队列执行，并通过 Server-Sent Events 实时展示运行进度
 - 报告 Tabs 展示智能体输出、最终报告、统计信息和决策结果
+- 支持自定义 OpenAI-compatible 模型接口和自定义 HTTP 数据接口
 - WebUI 支持中文和英文界面，并记住用户选择
 - Docker Compose 持久化日志、缓存、记忆、密钥和 WebUI 配置
 
@@ -108,6 +138,33 @@ npm run dev
 React 前端会从 `/api/metadata` 读取供应商、模型、语言、分析师、数据源和密钥字段。
 当上游 TradingAgents 新增或重命名运行选项时，优先更新后端 metadata/adapter
 层；大多数选项变化不需要改前端页面。
+
+### 自定义接口
+
+如果要使用 OpenAI-compatible 网关，在设置里选择 `Custom OpenAI-compatible`，
+填写网关 Base URL、快速/深度模型 ID，并在 API Key 面板保存
+`CUSTOM_OPENAI_API_KEY`。该模式适用于实现 OpenAI Chat Completions API 的服务。
+
+如果要使用自定义数据服务，将某个数据分类的数据源选择为 `custom`，然后为该分类
+填写 Base URL 和 endpoint path。WebUI 会发起：
+
+```http
+POST {baseUrl}{endpoint}
+Content-Type: application/json
+Authorization: Bearer CUSTOM_DATA_API_KEY
+```
+
+请求体：
+
+```json
+{
+  "method": "get_news",
+  "args": ["SPY"],
+  "kwargs": { "curr_date": "2026-05-01" }
+}
+```
+
+响应可以是纯文本、JSON，或带顶层 `data` 字段的 JSON。
 
 ### 开源协议
 

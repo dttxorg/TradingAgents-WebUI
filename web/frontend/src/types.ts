@@ -14,7 +14,13 @@ export type Metadata = {
   models: Record<string, Record<'quick' | 'deep', Option[]>>;
   languages: Option[];
   dataVendorCategories: Array<{ key: string; label: string; options: string[] }>;
+  customDataMethods: Array<{ method: string; category: string; label: string; defaultPath: string }>;
   secretFields: string[];
+};
+
+export type CustomDataInterface = {
+  baseUrl: string | null;
+  endpoints: Record<string, string>;
 };
 
 export type WebConfig = {
@@ -33,6 +39,7 @@ export type WebConfig = {
   checkpointEnabled: boolean;
   maxRecurLimit: number;
   dataVendors: Record<string, string>;
+  customDataInterfaces: Record<string, CustomDataInterface>;
 };
 
 export type SecretStatus = Record<string, { configured: boolean; masked: string | null }>;

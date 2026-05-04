@@ -93,6 +93,10 @@ class WebStorage:
     def runtime_config(self, web_config: WebConfig) -> dict[str, Any]:
         config = dict(DEFAULT_CONFIG)
         config["data_vendors"] = dict(web_config.data_vendors)
+        config["custom_data_interfaces"] = {
+            key: value.model_dump(mode="json", by_alias=True)
+            for key, value in web_config.custom_data_interfaces.items()
+        }
         config["max_debate_rounds"] = web_config.research_depth
         config["max_risk_discuss_rounds"] = web_config.research_depth
         config["quick_think_llm"] = web_config.quick_think_llm

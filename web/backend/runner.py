@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import threading
 import time
@@ -22,6 +23,8 @@ from cli.stats_handler import StatsCallbackHandler
 from tradingagents.graph.checkpointer import clear_checkpoint, get_checkpointer, thread_id
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 
+from .constants import CUSTOM_OPENAI_PROVIDER
+from .custom_data import configure_custom_data_interfaces
 from .schemas import RunInfo, RunReports, RunRequest, WebConfig
 from .storage import WebStorage
 
@@ -135,10 +138,20 @@ class RunManager:
         run.started_at = utc_now()
         run.emit("status", {"status": "running", "message": "Analysis started."})
         checkpointer_ctx = None
+        original_openrouter_key = os.environ.get("OPENROUTER_API_KEY")
 
         try:
+            secrets = self.storage.load_secrets()
             self.storage.load_secrets_into_env()
             runtime_config = self.storage.runtime_config(run.config)
+            if run.config.llm_provider == CUSTOM_OPENAI_PROVIDER:
+                runtime_config["llm_provider"] = "openrouter"
+                runtime_config["backend_url"] = run.config.backend_url
+                custom_key = secrets.get("CUSTOM_OPENAI_API_KEY")
+                if not custom_key:
+                    raise RuntimeError("CUSTOM_OPENAI_API_KEY is required for Custom OpenAI-compatible provider.")
+                os.environ["OPENROUTER_API_KEY"] = custom_key
+            configure_custom_data_interfaces(runtime_config, secrets.get("CUSTOM_DATA_API_KEY"))
             stats_handler = StatsCallbackHandler()
             event_handler = WebEventCallbackHandler(run)
 
@@ -245,6 +258,11 @@ class RunManager:
         finally:
             if checkpointer_ctx is not None:
                 checkpointer_ctx.__exit__(None, None, None)
+            if run.config.llm_provider == CUSTOM_OPENAI_PROVIDER:
+                if original_openrouter_key is None:
+                    os.environ.pop("OPENROUTER_API_KEY", None)
+                else:
+                    os.environ["OPENROUTER_API_KEY"] = original_openrouter_key
 
     def _process_chunk(
         self,
