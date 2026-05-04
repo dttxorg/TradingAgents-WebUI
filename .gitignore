@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[codz]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+
+# Environments and secrets
+.env
+.env.*
+!.env.example
+
+# Frontend
+node_modules/
+web/frontend/dist/
+*.tsbuildinfo
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/

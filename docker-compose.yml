@@ -1,0 +1,23 @@
+services:
+  web:
+    build: .
+    environment:
+      - TRADINGAGENTS_RESULTS_DIR=/home/appuser/.tradingagents/logs
+      - TRADINGAGENTS_CACHE_DIR=/home/appuser/.tradingagents/cache
+      - TRADINGAGENTS_MEMORY_LOG_PATH=/home/appuser/.tradingagents/memory/trading_memory.md
+      - TRADINGAGENTS_WEB_DATA_DIR=/home/appuser/.tradingagents/web
+    ports:
+      - "8000:8000"
+    volumes:
+      - tradingagents_data:/home/appuser/.tradingagents
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    profiles:
+      - ollama
+
+volumes:
+  tradingagents_data:
+  ollama_data:
