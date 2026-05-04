@@ -50,6 +50,31 @@ button:disabled {
   color: #a9b6b8;
 }
 
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.auth-card {
+  width: min(460px, 100%);
+  display: grid;
+  gap: 12px;
+  border: 1px solid #203035;
+  background: rgba(14, 21, 24, 0.96);
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.auth-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 4px;
+}
+
 .spin {
   animation: spin 900ms linear infinite;
 }
@@ -203,6 +228,20 @@ h2 {
   border-color: #6a5b32;
 }
 
+.account-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #2d453c;
+  background: #101a17;
+  color: #d9f6ea;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 760;
+}
+
 .primary,
 .secondary {
   height: 38px;
@@ -245,6 +284,22 @@ h2 {
   border: 1px solid #744245;
   background: #241718;
   color: #ffd1cf;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.alert.compact {
+  margin-bottom: 0;
+}
+
+.notice {
+  margin-bottom: 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid #2b6b52;
+  background: #102019;
+  color: #c8ffe5;
   border-radius: 8px;
   padding: 12px;
 }
@@ -309,6 +364,17 @@ h2 {
   color: #eef5f4;
   font-size: 22px;
   line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-card small {
+  display: block;
+  margin-top: 6px;
+  color: #8fa0a2;
+  font-size: 11px;
+  font-weight: 680;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -535,8 +601,104 @@ textarea {
   margin-top: 14px;
 }
 
+.tool-row.single-control {
+  grid-template-columns: 220px;
+}
+
 .settings-model-row {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 150px;
+}
+
+.billing-form {
+  display: grid;
+  gap: 12px;
+}
+
+.billing-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.depth-price-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.depth-price-card {
+  display: grid;
+  grid-template-columns: 70px repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  align-items: end;
+  border: 1px solid #25373c;
+  background: #0c1215;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.depth-price-card strong {
+  color: #eef5f4;
+  font-size: 13px;
+  align-self: center;
+}
+
+.new-user-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.new-user-grid button {
+  grid-column: span 2;
+}
+
+.user-list,
+.order-list {
+  display: grid;
+  gap: 8px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.user-row,
+.order-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  border: 1px solid #25373c;
+  background: #0c1215;
+  border-radius: 8px;
+  padding: 9px;
+}
+
+.order-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.user-row strong,
+.order-row strong,
+.order-row em {
+  color: #eef5f4;
+  font-size: 13px;
+  font-style: normal;
+}
+
+.user-row small,
+.order-row small {
+  display: block;
+  margin-top: 2px;
+  color: #8fa0a2;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.order-row > span:last-child {
+  text-align: right;
+}
+
+.recharge-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
 }
 
 .settings-language-grid {
@@ -1142,8 +1304,12 @@ textarea {
   .form-grid,
   .advanced-grid,
   .tool-row,
+  .tool-row.single-control,
   .settings-form,
   .settings-model-row,
+  .billing-grid,
+  .depth-price-card,
+  .new-user-grid,
   .agent-grid,
   .metrics-row,
   .endpoint-grid,
@@ -1154,6 +1320,10 @@ textarea {
   .flow-card,
   .timeline-estimate {
     grid-template-columns: 1fr;
+  }
+
+  .new-user-grid button {
+    grid-column: span 1;
   }
 
   .ticker-list-field {

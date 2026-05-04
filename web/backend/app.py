@@ -3,19 +3,39 @@ from __future__ import annotations
 import asyncio
 import json
 import queue
+import os
 from pathlib import Path
 from typing import AsyncIterator
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from requests import RequestException
 
+from .auth import SESSION_COOKIE
 from .constants import metadata_payload
 from .model_discovery import fetch_provider_models
 from .runner import RunManager
-from .schemas import BatchRunRequest, BatchRunResponse, ModelFetchRequest, RunListResponse, RunRequest, SecretsUpdate, WebConfig
+from .schemas import (
+    AdminUserCreate,
+    AdminUserUpdate,
+    BatchRunRequest,
+    BatchRunResponse,
+    BootstrapRequest,
+    BootstrapStatus,
+    LoginRequest,
+    ModelFetchRequest,
+    PricingConfig,
+    RechargeRequest,
+    RunListResponse,
+    RunRequest,
+    SecretsUpdate,
+    SessionResponse,
+    UserListResponse,
+    UserPublic,
+    WebConfig,
+)
 from .storage import WebStorage
 
 
@@ -29,9 +49,174 @@ run_manager = RunManager(storage)
 app = FastAPI(title="TradingAgents Web API", version="0.1.0")
 
 
+def _cookie_secure() -> bool:
+    return os.getenv("TRADINGAGENTS_SECURE_COOKIES", "0").lower() in {"1", "true", "yes"}
+
+
+def set_session_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite="lax",
+        max_age=60 * 60 * 24 * 14,
+        path="/",
+    )
+
+
+def clear_session_cookie(response: Response) -> None:
+    response.delete_cookie(SESSION_COOKIE, path="/", samesite="lax")
+
+
+def current_user(session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE)) -> UserPublic:
+    user = storage.get_user_for_session(session_token)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    return user
+
+
+def admin_user(user: UserPublic = Depends(current_user)) -> UserPublic:
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin permission required.")
+    return user
+
+
+def user_run_config(request: RunRequest, user: UserPublic) -> RunRequest:
+    if user.role == "admin" or request.config is None:
+        return request
+    defaults = storage.load_config()
+    allowed = {
+        "ticker": request.ticker,
+        "analysis_date": request.analysis_date,
+        "analysts": request.config.analysts,
+        "research_depth": request.config.research_depth,
+    }
+    return RunRequest(
+        ticker=request.ticker,
+        analysisDate=request.analysis_date,
+        config=defaults.model_copy(update=allowed),
+    )
+
+
+def user_batch_config(request: BatchRunRequest, user: UserPublic) -> BatchRunRequest:
+    if user.role == "admin" or request.config is None:
+        return request
+    defaults = storage.load_config()
+    return BatchRunRequest(
+        tickers=request.tickers,
+        analysisDate=request.analysis_date,
+        config=defaults.model_copy(
+            update={
+                "ticker": request.tickers[0],
+                "analysis_date": request.analysis_date,
+                "analysts": request.config.analysts,
+                "research_depth": request.config.research_depth,
+            }
+        ),
+    )
+
+
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/auth/bootstrap/status")
+def bootstrap_status() -> dict:
+    return BootstrapStatus(required=not storage.users_exist()).model_dump(mode="json", by_alias=True)
+
+
+@app.post("/api/auth/bootstrap")
+def bootstrap_admin(request: BootstrapRequest, response: Response) -> dict:
+    try:
+        user = storage.create_bootstrap_admin(
+            request.username,
+            request.password,
+            request.display_name,
+            request.initial_balance,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    set_session_cookie(response, storage.create_session(user.id))
+    return SessionResponse(user=user).model_dump(mode="json", by_alias=True)
+
+
+@app.post("/api/auth/login")
+def login(request: LoginRequest, response: Response) -> dict:
+    user = storage.authenticate_user(request.username, request.password)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid username or password.")
+    set_session_cookie(response, storage.create_session(user.id))
+    return SessionResponse(user=user).model_dump(mode="json", by_alias=True)
+
+
+@app.post("/api/auth/logout")
+def logout(response: Response, session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE)) -> dict[str, str]:
+    storage.delete_session(session_token)
+    clear_session_cookie(response)
+    return {"status": "ok"}
+
+
+@app.get("/api/auth/me")
+def me(user: UserPublic = Depends(current_user)) -> dict:
+    return SessionResponse(user=user).model_dump(mode="json", by_alias=True)
+
+
+@app.get("/api/billing/pricing/public")
+def public_pricing() -> dict:
+    return storage.public_pricing().model_dump(mode="json", by_alias=True)
+
+
+@app.get("/api/billing/orders")
+def my_orders(user: UserPublic = Depends(current_user), limit: int = Query(default=100, ge=1, le=500)) -> dict:
+    return storage.list_orders(user_id=user.id, limit=limit).model_dump(mode="json", by_alias=True)
+
+
+@app.get("/api/admin/users")
+def admin_list_users(_: UserPublic = Depends(admin_user)) -> dict:
+    return UserListResponse(users=storage.list_users()).model_dump(mode="json", by_alias=True)
+
+
+@app.post("/api/admin/users")
+def admin_create_user(request: AdminUserCreate, _: UserPublic = Depends(admin_user)) -> dict:
+    try:
+        user = storage.create_user(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return user.model_dump(mode="json", by_alias=True)
+
+
+@app.patch("/api/admin/users/{user_id}")
+def admin_update_user(user_id: str, request: AdminUserUpdate, _: UserPublic = Depends(admin_user)) -> dict:
+    user = storage.update_user(user_id, request)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return user.model_dump(mode="json", by_alias=True)
+
+
+@app.post("/api/admin/users/{user_id}/recharge")
+def admin_recharge_user(user_id: str, request: RechargeRequest, actor: UserPublic = Depends(admin_user)) -> dict:
+    try:
+        order = storage.create_recharge_order(user_id, request, actor.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return order.model_dump(mode="json", by_alias=True)
+
+
+@app.get("/api/admin/billing/pricing")
+def admin_get_pricing(_: UserPublic = Depends(admin_user)) -> dict:
+    return storage.load_pricing().model_dump(mode="json", by_alias=True)
+
+
+@app.put("/api/admin/billing/pricing")
+def admin_put_pricing(pricing: PricingConfig, _: UserPublic = Depends(admin_user)) -> dict:
+    return storage.save_pricing(pricing).model_dump(mode="json", by_alias=True)
+
+
+@app.get("/api/admin/orders")
+def admin_orders(_: UserPublic = Depends(admin_user), limit: int = Query(default=200, ge=1, le=500)) -> dict:
+    return storage.list_orders(limit=limit).model_dump(mode="json", by_alias=True)
 
 
 @app.get("/api/metadata")
@@ -40,18 +225,18 @@ def get_metadata() -> dict:
 
 
 @app.get("/api/config")
-def get_config() -> dict:
+def get_config(_: UserPublic = Depends(current_user)) -> dict:
     return storage.load_config().model_dump(mode="json", by_alias=True)
 
 
 @app.put("/api/config")
-def put_config(config: WebConfig) -> dict:
+def put_config(config: WebConfig, _: UserPublic = Depends(admin_user)) -> dict:
     saved = storage.save_config(config)
     return saved.model_dump(mode="json", by_alias=True)
 
 
 @app.get("/api/secrets/status")
-def get_secret_status() -> dict:
+def get_secret_status(_: UserPublic = Depends(admin_user)) -> dict:
     return {
         key: value.model_dump(mode="json", by_alias=True)
         for key, value in storage.secret_status().items()
@@ -59,7 +244,7 @@ def get_secret_status() -> dict:
 
 
 @app.put("/api/secrets")
-def put_secrets(update: SecretsUpdate) -> dict:
+def put_secrets(update: SecretsUpdate, _: UserPublic = Depends(admin_user)) -> dict:
     return {
         key: value.model_dump(mode="json", by_alias=True)
         for key, value in storage.save_secrets(update.values).items()
@@ -67,7 +252,7 @@ def put_secrets(update: SecretsUpdate) -> dict:
 
 
 @app.post("/api/models/fetch")
-def fetch_models(request: ModelFetchRequest) -> dict:
+def fetch_models(request: ModelFetchRequest, _: UserPublic = Depends(admin_user)) -> dict:
     try:
         return fetch_provider_models(request, storage.load_secrets()).model_dump(mode="json", by_alias=True)
     except ValueError as exc:
@@ -77,25 +262,40 @@ def fetch_models(request: ModelFetchRequest) -> dict:
 
 
 @app.post("/api/runs")
-def create_run(request: RunRequest) -> dict:
-    run = run_manager.create_run(request)
+def create_run(request: RunRequest, user: UserPublic = Depends(current_user)) -> dict:
+    try:
+        run = run_manager.create_run(user_run_config(request, user), user=user)
+    except ValueError as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
     return run.info().model_dump(mode="json", by_alias=True)
 
 
 @app.post("/api/runs/batch")
-def create_batch_runs(request: BatchRunRequest) -> dict:
-    runs = run_manager.create_batch_runs(request)
+def create_batch_runs(request: BatchRunRequest, user: UserPublic = Depends(current_user)) -> dict:
+    try:
+        runs = run_manager.create_batch_runs(user_batch_config(request, user), user=user)
+    except ValueError as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
     return BatchRunResponse(runs=[run.info() for run in runs]).model_dump(mode="json", by_alias=True)
 
 
 @app.get("/api/runs")
-def list_runs(active_only: bool = Query(default=False, alias="activeOnly"), limit: int = Query(default=100, ge=1, le=200)) -> dict:
-    runs = run_manager.list_runs(active_only=active_only, limit=limit)
+def list_runs(
+    active_only: bool = Query(default=False, alias="activeOnly"),
+    limit: int = Query(default=100, ge=1, le=200),
+    user: UserPublic = Depends(current_user),
+) -> dict:
+    runs = run_manager.list_runs(active_only=active_only, limit=limit, user_id=None if user.role == "admin" else user.id)
     return RunListResponse(runs=[run.info() for run in runs]).model_dump(mode="json", by_alias=True)
 
 
 @app.post("/api/runs/{run_id}/cancel")
-def cancel_run(run_id: str) -> dict:
+def cancel_run(run_id: str, user: UserPublic = Depends(current_user)) -> dict:
+    existing = run_manager.get_run(run_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    if user.role != "admin" and existing.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Run does not belong to this user.")
     run = run_manager.cancel_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found.")
@@ -103,39 +303,47 @@ def cancel_run(run_id: str) -> dict:
 
 
 @app.get("/api/runs/{run_id}")
-def get_run(run_id: str) -> dict:
+def get_run(run_id: str, user: UserPublic = Depends(current_user)) -> dict:
     run = run_manager.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found.")
+    if user.role != "admin" and run.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Run does not belong to this user.")
     return run.info().model_dump(mode="json", by_alias=True)
 
 
 @app.get("/api/runs/{run_id}/reports")
-def get_run_reports(run_id: str) -> dict:
+def get_run_reports(run_id: str, user: UserPublic = Depends(current_user)) -> dict:
     run = run_manager.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found.")
+    if user.role != "admin" and run.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Run does not belong to this user.")
     return run.report_payload().model_dump(mode="json", by_alias=True)
 
 
 @app.get("/api/reports/history")
-def list_report_history(limit: int = Query(default=50, ge=1, le=200)) -> dict:
-    return storage.list_report_history(limit=limit).model_dump(mode="json", by_alias=True)
+def list_report_history(limit: int = Query(default=50, ge=1, le=200), user: UserPublic = Depends(current_user)) -> dict:
+    return storage.list_report_history(limit=limit, user_id=None if user.role == "admin" else user.id).model_dump(mode="json", by_alias=True)
 
 
 @app.get("/api/reports/history/{run_id}")
-def get_report_history(run_id: str) -> dict:
+def get_report_history(run_id: str, user: UserPublic = Depends(current_user)) -> dict:
     archive = storage.load_report_history(run_id)
     if archive is None:
         raise HTTPException(status_code=404, detail="Historical report not found.")
+    if user.role != "admin" and archive.run.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Historical report does not belong to this user.")
     return archive.model_dump(mode="json", by_alias=True)
 
 
 @app.get("/api/runs/{run_id}/events")
-async def get_run_events(run_id: str) -> StreamingResponse:
+async def get_run_events(run_id: str, user: UserPublic = Depends(current_user)) -> StreamingResponse:
     run = run_manager.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found.")
+    if user.role != "admin" and run.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Run does not belong to this user.")
 
     async def stream() -> AsyncIterator[str]:
         cursor = 0

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,8 +14,17 @@ from web.backend.constants import CUSTOM_DATA_VENDOR, CUSTOM_OPENAI_PROVIDER, me
 from web.backend.custom_data import configure_custom_data_interfaces
 from web.backend.model_discovery import fetch_provider_models
 from web.backend.runner import RunManager
-from web.backend.schemas import ModelFetchRequest, RunInfo, RunReports, RunRequest, WebConfig
-from web.backend.storage import WebStorage, mask_secret
+from web.backend.schemas import ModelFetchRequest, PricingConfig, RechargeRequest, RunInfo, RunReports, RunRequest, WebConfig
+from web.backend.storage import WebStorage, calculate_analysis_cost, mask_secret, usage_from_stats
+
+
+def login_test_admin(client: TestClient, storage: WebStorage, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(app_module, "storage", storage)
+    response = client.post(
+        "/api/auth/bootstrap",
+        json={"username": "admin", "password": "password123", "initialBalance": "100.00"},
+    )
+    assert response.status_code == 200
 
 
 def test_metadata_exposes_configurable_catalogs():
@@ -61,6 +71,81 @@ def test_storage_reports_environment_secret_status(monkeypatch, tmp_path):
     assert storage.load_secrets()["MOONSHOT_API_KEY"] == "env-moonshot-secret"
     assert status["MOONSHOT_API_KEY"].configured is True
     assert status["MOONSHOT_API_KEY"].masked == "env-...cret"
+
+
+def test_auth_bootstrap_login_and_role_permissions(monkeypatch, tmp_path):
+    storage = WebStorage(tmp_path)
+    monkeypatch.setattr(app_module, "storage", storage)
+    client = TestClient(app)
+
+    assert client.get("/api/auth/bootstrap/status").json() == {"required": True}
+    bootstrap = client.post(
+        "/api/auth/bootstrap",
+        json={"username": "admin", "password": "password123", "initialBalance": "25.00"},
+    )
+    assert bootstrap.status_code == 200
+    assert bootstrap.json()["user"]["role"] == "admin"
+    assert client.get("/api/auth/me").json()["user"]["balance"] == "25.000000"
+
+    created = client.post(
+        "/api/admin/users",
+        json={"username": "alice", "password": "password123", "initialBalance": "3.50"},
+    )
+    assert created.status_code == 200
+    assert created.json()["role"] == "user"
+
+    client.post("/api/auth/logout")
+    login = client.post("/api/auth/login", json={"username": "alice", "password": "password123"})
+    assert login.status_code == 200
+    assert client.get("/api/config").status_code == 200
+    assert client.get("/api/secrets/status").status_code == 403
+
+
+def test_billing_preauthorizes_settles_and_recharges(tmp_path):
+    storage = WebStorage(tmp_path)
+    user = storage.create_bootstrap_admin("admin", "password123", None, Decimal("10.00"))
+    config = WebConfig(ticker="SPY", analysisDate=date.today(), analysts=["market"], researchDepth=1)
+
+    billing = storage.preauthorize_analysis(user.id, "11111111-1111-4111-8111-111111111111", config)
+    after_hold = storage.get_user(user.id)
+    assert billing.status == "preauthorized"
+    assert billing.preauthorized_amount == Decimal("0.375000")
+    assert after_hold is not None
+    assert after_hold.balance == Decimal("9.625000")
+    assert after_hold.frozen_balance == Decimal("0.375000")
+
+    settled = storage.settle_analysis_order(
+        billing.order_id,
+        config,
+        {"tokens_in": 1000, "tokens_out": 1000, "llm_calls": 2, "tool_calls": 1},
+        "succeeded",
+    )
+    assert settled is not None
+    assert settled.status == "settled"
+    assert settled.actual_amount == Decimal("0.006000")
+    assert settled.refunded_amount == Decimal("0.369000")
+    assert settled.usage.input_tokens == 1000
+
+    after_settle = storage.get_user(user.id)
+    assert after_settle is not None
+    assert after_settle.balance == Decimal("9.994000")
+    assert after_settle.frozen_balance == Decimal("0.000000")
+
+    recharge = storage.create_recharge_order(user.id, RechargeRequest(amount=Decimal("5.00")))
+    assert recharge.status == "completed"
+    assert storage.get_user(user.id).balance == Decimal("14.994000")  # type: ignore[union-attr]
+
+
+def test_pricing_supports_per_run_depth_prices():
+    pricing = PricingConfig(
+        billingMode="per_run",
+        fixedRunPrice=Decimal("0.20"),
+        fixedPricesByDepth={"1": Decimal("0.10"), "3": Decimal("1.00"), "5": Decimal("2.00")},
+    )
+    config = WebConfig(ticker="SPY", analysisDate=date.today(), researchDepth=3)
+    usage = usage_from_stats({"tokens_in": 500000, "tokens_out": 250000})
+
+    assert calculate_analysis_cost(pricing, config, usage) == Decimal("1.200000")
 
 
 def test_storage_persists_report_history(tmp_path):
@@ -295,7 +380,6 @@ def test_model_discovery_requires_saved_secret():
 def test_model_fetch_endpoint_uses_saved_secret(monkeypatch, tmp_path):
     storage = WebStorage(tmp_path)
     storage.save_secrets({"MOONSHOT_API_KEY": "moonshot-key"})
-    monkeypatch.setattr(app_module, "storage", storage)
 
     class FakeResponse:
         def raise_for_status(self):
@@ -306,6 +390,7 @@ def test_model_fetch_endpoint_uses_saved_secret(monkeypatch, tmp_path):
 
     monkeypatch.setattr("web.backend.model_discovery.requests.get", lambda *args, **kwargs: FakeResponse())
     client = TestClient(app)
+    login_test_admin(client, storage, monkeypatch)
 
     payload = client.post(
         "/api/models/fetch",
@@ -318,7 +403,6 @@ def test_model_fetch_endpoint_uses_saved_secret(monkeypatch, tmp_path):
 
 def test_model_fetch_endpoint_uses_environment_secret(monkeypatch, tmp_path):
     storage = WebStorage(tmp_path)
-    monkeypatch.setattr(app_module, "storage", storage)
     monkeypatch.setenv("MOONSHOT_API_KEY", "env-moonshot-key")
 
     class FakeResponse:
@@ -330,6 +414,7 @@ def test_model_fetch_endpoint_uses_environment_secret(monkeypatch, tmp_path):
 
     monkeypatch.setattr("web.backend.model_discovery.requests.get", lambda *args, **kwargs: FakeResponse())
     client = TestClient(app)
+    login_test_admin(client, storage, monkeypatch)
 
     payload = client.post(
         "/api/models/fetch",
@@ -390,14 +475,16 @@ def test_batch_run_endpoint_queues_runs_in_order(monkeypatch, tmp_path):
             )
 
     class FakeRunManager:
-        def create_batch_runs(self, request):
+        def create_batch_runs(self, request, user=None):
             return [
                 FakeRun(f"33333333-3333-4333-8333-33333333333{index}", ticker, request.analysis_date)
                 for index, ticker in enumerate(request.tickers)
             ]
 
+    storage = WebStorage(tmp_path)
     monkeypatch.setattr(app_module, "run_manager", FakeRunManager())
     client = TestClient(app)
+    login_test_admin(client, storage, monkeypatch)
 
     response = client.post(
         "/api/runs/batch",
@@ -413,7 +500,7 @@ def test_batch_run_endpoint_queues_runs_in_order(monkeypatch, tmp_path):
     assert [item["ticker"] for item in payload["runs"]] == ["SPY", "0700.HK"]
 
 
-def test_run_list_endpoint_returns_active_runs(monkeypatch):
+def test_run_list_endpoint_returns_active_runs(monkeypatch, tmp_path):
     run = RunInfo(
         id="44444444-4444-4444-8444-444444444444",
         status="running",
@@ -427,13 +514,16 @@ def test_run_list_endpoint_returns_active_runs(monkeypatch):
             return run
 
     class FakeRunManager:
-        def list_runs(self, active_only=False, limit=100):
+        def list_runs(self, active_only=False, limit=100, user_id=None):
             assert active_only is True
             assert limit == 100
+            assert user_id is None
             return [FakeRun()]
 
+    storage = WebStorage(tmp_path)
     monkeypatch.setattr(app_module, "run_manager", FakeRunManager())
     client = TestClient(app)
+    login_test_admin(client, storage, monkeypatch)
 
     payload = client.get("/api/runs?activeOnly=true").json()
 
@@ -441,7 +531,7 @@ def test_run_list_endpoint_returns_active_runs(monkeypatch):
     assert payload["runs"][0]["status"] == "running"
 
 
-def test_cancel_run_endpoint_returns_cancelled_run(monkeypatch):
+def test_cancel_run_endpoint_returns_cancelled_run(monkeypatch, tmp_path):
     run = RunInfo(
         id="55555555-5555-4555-8555-555555555555",
         status="cancelled",
@@ -452,16 +542,24 @@ def test_cancel_run_endpoint_returns_cancelled_run(monkeypatch):
     )
 
     class FakeRun:
+        user_id = None
+
         def info(self):
             return run
 
     class FakeRunManager:
+        def get_run(self, run_id):
+            assert run_id == run.id
+            return FakeRun()
+
         def cancel_run(self, run_id):
             assert run_id == run.id
             return FakeRun()
 
+    storage = WebStorage(tmp_path)
     monkeypatch.setattr(app_module, "run_manager", FakeRunManager())
     client = TestClient(app)
+    login_test_admin(client, storage, monkeypatch)
 
     payload = client.post(f"/api/runs/{run.id}/cancel").json()
 
@@ -486,8 +584,8 @@ def test_report_history_endpoints(monkeypatch, tmp_path):
         config,
         RunReports(runId=run.id, reports={"market_report": "Market report"}, finalReport="Final", decision="BUY"),
     )
-    monkeypatch.setattr(app_module, "storage", storage)
     client = TestClient(app)
+    login_test_admin(client, storage, monkeypatch)
 
     list_payload = client.get("/api/reports/history").json()
     detail_payload = client.get(f"/api/reports/history/{run.id}").json()

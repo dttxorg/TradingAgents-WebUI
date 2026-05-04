@@ -25,6 +25,9 @@ instead of being hard-coded in the React app.
 - Report tabs for agent output, final report, stats, and decision
 - Persistent report history for reviewing prior runs and preparing future
   backtesting workflows
+- Account login, admin/user role separation, user balances, isolated secret
+  permissions, token statistics, order records, pre-authorization, post-run
+  settlement, refunds, manual recharge, and configurable token/per-run pricing
 - Custom OpenAI-compatible LLM endpoints and custom HTTP data interfaces
 - Per-agent LLM routing so parallelizable or rate-limit-sensitive steps can use
   separate provider/API-key/model/Base URL settings
@@ -70,6 +73,24 @@ Completed reports are archived under the WebUI data directory and exposed via
 stores the run metadata, report payload, final report, decision, and non-secret
 configuration snapshot, which gives future backtesting features a stable input
 surface.
+
+### Accounts and Billing
+
+On first launch, the WebUI asks you to create the first administrator account.
+After that, all protected APIs require login. Administrators can configure API
+keys, provider settings, data interfaces, users, recharge records, and pricing.
+Normal users can run stock analyses, stop their own runs, view their own active
+workflows, view their historical reports, and inspect their own orders.
+
+Billing is local-file based for v1. Before an analysis starts, the backend
+freezes the maximum estimated cost from the user's balance. When the run
+finishes, fails, or is cancelled, the backend reads the collected token stats,
+deducts the actual charge, and returns the unused frozen amount. Pricing can be
+token-based, fixed per run, or hybrid; administrators can set token prices,
+consumption multiplier, depth multipliers, fixed depth prices, and estimated
+pre-authorization tokens. Recharges are exposed as manual admin operations and
+order records, so a real payment provider can be added later without changing
+the report/run billing contract.
 
 ### Custom Interfaces
 
@@ -156,6 +177,9 @@ TradingAgents-WebUI 是一个面向
 - 支持多股票按列表提交，并可配置股票任务并行 worker 数
 - 报告 Tabs 展示智能体输出、最终报告、统计信息和决策结果
 - 持久化历史报告，方便回看历史运行结果，并为后续回测功能准备数据基础
+- 支持账号登录、管理员/普通用户分级、用户余额、API Key 权限隔离、Token
+  统计、订单记录、预授权冻结、运行后结算、多余退款、手动充值，以及可配置的
+  Token/按次/混合计费
 - 支持自定义 OpenAI-compatible 模型接口和自定义 HTTP 数据接口
 - 支持按智能体配置独立 LLM 路由，使可并行或容易限流的步骤可以使用不同的
   供应商/API Key/模型/Base URL
@@ -196,6 +220,19 @@ React 前端会从 `/api/metadata` 读取供应商、模型、语言、分析师
 完成的报告会归档到 WebUI 数据目录，并通过 `GET /api/reports/history` 和
 `GET /api/reports/history/{runId}` 暴露。每份归档包含运行元数据、报告内容、
 最终报告、决策结果和不含密钥的配置快照，后续回测功能可以直接复用这层稳定数据。
+
+### 账号与计费
+
+首次启动 WebUI 时，需要先创建第一个管理员账号。之后受保护 API 都需要登录。
+管理员可以设置 API Key、供应商参数、数据接口、用户、充值记录和价格；普通用户
+只能发起股票分析、停止自己的任务、查看自己的运行工作流、历史报告和订单记录。
+
+v1 的计费系统使用本地文件存储。分析开始前，后端会按最大预估费用从用户余额中
+冻结额度；任务完成、失败或取消后，后端读取实际 Token 统计，按实际费用扣款，
+并把多余冻结额退回余额。价格支持按 Token、按次和混合计费；管理员可以设置
+Token 单价、消耗倍数、研究深度倍率、按深度固定费用和预授权估算 Token。
+充值目前以管理员手动入账和订单记录的方式提供，后续接入真实支付渠道时可以复用
+现有订单与结算接口。
 
 ### 自定义接口
 

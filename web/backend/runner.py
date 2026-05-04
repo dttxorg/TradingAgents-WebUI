@@ -31,7 +31,7 @@ from .constants import (
 )
 from .custom_data import configure_custom_data_interfaces
 from .llm_routing import has_enabled_llm_routes, routed_workflow
-from .schemas import BatchRunRequest, RunInfo, RunReports, RunRequest, WebConfig
+from .schemas import BatchRunRequest, RunBilling, RunInfo, RunReports, RunRequest, UserPublic, WebConfig
 from .storage import WebStorage
 
 
@@ -123,6 +123,9 @@ class RunRecord:
     id: str
     request: RunRequest
     config: WebConfig
+    user_id: str | None = None
+    order_id: str | None = None
+    billing: RunBilling | None = None
     submitted_at: datetime = field(default_factory=utc_now)
     started_at: datetime | None = None
     ended_at: datetime | None = None
@@ -135,6 +138,7 @@ class RunRecord:
     cancel_requested: bool = False
     events: list[dict[str, Any]] = field(default_factory=list)
     event_queue: "queue.Queue[dict[str, Any]]" = field(default_factory=queue.Queue)
+    billing_settled: bool = False
 
     def emit(self, event_type: str, payload: dict[str, Any]) -> None:
         event = {
@@ -152,12 +156,15 @@ class RunRecord:
             status=self.status,
             ticker=self.request.ticker,
             analysis_date=self.request.analysis_date,
+            user_id=self.user_id,
+            order_id=self.order_id,
             submitted_at=self.submitted_at,
             started_at=self.started_at,
             ended_at=self.ended_at,
             error=self.error,
             decision=self.decision,
             stats=self.stats,
+            billing=self.billing,
         )
 
     def report_payload(self) -> RunReports:
@@ -179,7 +186,7 @@ class RunManager:
         self._workers: list[threading.Thread] = []
         self._ensure_worker_count(self.storage.load_config().max_parallel_runs)
 
-    def create_run(self, request: RunRequest) -> RunRecord:
+    def create_run(self, request: RunRequest, user: UserPublic | None = None) -> RunRecord:
         config = request.config or self.storage.load_config()
         self._ensure_worker_count(config.max_parallel_runs)
         config = config.model_copy(
@@ -188,15 +195,31 @@ class RunManager:
                 "analysis_date": request.analysis_date,
             }
         )
-        run = RunRecord(id=str(uuid.uuid4()), request=request, config=config)
+        run_id = str(uuid.uuid4())
+        billing = None
+        order_id = None
+        if user is not None:
+            billing = self.storage.preauthorize_analysis(user.id, run_id, config)
+            order_id = billing.order_id
+        run = RunRecord(id=run_id, request=request, config=config, user_id=user.id if user else None, order_id=order_id, billing=billing)
         with self._lock:
             self.runs[run.id] = run
-        run.emit("status", {"status": "queued", "message": localized_event_message(run.config.output_language, "run_queued")})
+        run.emit(
+            "status",
+            {
+                "status": "queued",
+                "message": localized_event_message(run.config.output_language, "run_queued"),
+                "billing": run.billing.model_dump(mode="json", by_alias=True) if run.billing else None,
+            },
+        )
         self.pending.put(run.id)
         return run
 
-    def create_batch_runs(self, request: BatchRunRequest) -> list[RunRecord]:
+    def create_batch_runs(self, request: BatchRunRequest, user: UserPublic | None = None) -> list[RunRecord]:
         runs: list[RunRecord] = []
+        if user is not None:
+            config = request.config or self.storage.load_config()
+            self.storage.ensure_batch_balance(user.id, config, len(request.tickers))
         for ticker in request.tickers:
             runs.append(
                 self.create_run(
@@ -204,7 +227,8 @@ class RunManager:
                         ticker=ticker,
                         analysis_date=request.analysis_date,
                         config=request.config,
-                    )
+                    ),
+                    user=user,
                 )
             )
         return runs
@@ -228,6 +252,7 @@ class RunManager:
                 {
                     "status": "cancelled",
                     "message": localized_event_message(run.config.output_language, "analysis_cancelled"),
+                    "billing": run.billing.model_dump(mode="json", by_alias=True) if run.billing else None,
                 },
             )
             return run
@@ -240,10 +265,12 @@ class RunManager:
         )
         return run
 
-    def list_runs(self, active_only: bool = False, limit: int = 100) -> list[RunRecord]:
+    def list_runs(self, active_only: bool = False, limit: int = 100, user_id: str | None = None) -> list[RunRecord]:
         limit = max(1, min(limit, 200))
         with self._lock:
             runs = list(self.runs.values())
+        if user_id is not None:
+            runs = [run for run in runs if run.user_id == user_id]
         if active_only:
             runs = [run for run in runs if run.status in {"queued", "running"}]
         runs.sort(key=lambda run: run.submitted_at, reverse=True)
@@ -273,7 +300,14 @@ class RunManager:
             return
         run.status = "running"
         run.started_at = utc_now()
-        run.emit("status", {"status": "running", "message": localized_event_message(run.config.output_language, "analysis_started")})
+        run.emit(
+            "status",
+            {
+                "status": "running",
+                "message": localized_event_message(run.config.output_language, "analysis_started"),
+                "billing": run.billing.model_dump(mode="json", by_alias=True) if run.billing else None,
+            },
+        )
         checkpointer_ctx = None
         original_openrouter_key = os.environ.get("OPENROUTER_API_KEY")
 
@@ -394,6 +428,7 @@ class RunManager:
             run.stats = stats_handler.get_stats()
             run.status = "succeeded"
             run.ended_at = utc_now()
+            self._settle_billing(run, "succeeded")
             self.storage.save_report_history(run.info(), run.config, run.report_payload())
             run.emit(
                 "status",
@@ -402,6 +437,7 @@ class RunManager:
                     "message": localized_event_message(run.config.output_language, "analysis_completed"),
                     "decision": run.decision,
                     "stats": run.stats,
+                    "billing": run.billing.model_dump(mode="json", by_alias=True) if run.billing else None,
                 },
             )
             run.emit("reports", run.report_payload().model_dump(mode="json", by_alias=True))
@@ -409,12 +445,14 @@ class RunManager:
             run.status = "failed"
             run.error = str(exc)
             run.ended_at = utc_now()
+            self._settle_billing(run, "failed")
             run.emit(
                 "status",
                 {
                     "status": "failed",
                     "message": str(exc),
                     "traceback": traceback.format_exc(),
+                    "billing": run.billing.model_dump(mode="json", by_alias=True) if run.billing else None,
                 },
             )
         finally:
@@ -429,13 +467,21 @@ class RunManager:
     def _mark_cancelled(self, run: RunRecord) -> None:
         run.status = "cancelled"
         run.ended_at = utc_now()
+        self._settle_billing(run, "cancelled")
         run.emit(
             "status",
             {
                 "status": "cancelled",
                 "message": localized_event_message(run.config.output_language, "analysis_cancelled"),
+                "billing": run.billing.model_dump(mode="json", by_alias=True) if run.billing else None,
             },
         )
+
+    def _settle_billing(self, run: RunRecord, status: str) -> None:
+        if run.billing_settled:
+            return
+        run.billing = self.storage.settle_analysis_order(run.order_id, run.config, run.stats, status) or run.billing
+        run.billing_settled = True
 
     def _process_chunk(
         self,
@@ -510,6 +556,7 @@ class RunManager:
                 "agents": message_buffer.agent_status,
                 "reports": run.reports,
                 "stats": run.stats,
+                "billing": run.billing.model_dump(mode="json", by_alias=True) if run.billing else None,
                 "elapsedSeconds": int(time.time() - start),
             },
         )

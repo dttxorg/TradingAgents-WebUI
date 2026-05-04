@@ -9,6 +9,7 @@ import {
   Check,
   CircleAlert,
   CircleDot,
+  CreditCard,
   Database,
   Gauge,
   History,
@@ -16,17 +17,35 @@ import {
   Languages,
   Lightbulb,
   ListOrdered,
+  LogIn,
   Loader2,
   Play,
   RefreshCw,
+  ReceiptText,
   Save,
   Server,
   Settings2,
   Square,
   TerminalSquare,
+  UserPlus,
+  Users,
+  Wallet,
 } from 'lucide-react';
 import { api } from './api';
-import type { HistoricalReport, Metadata, ReportHistoryItem, ReportsPayload, RunEvent, RunInfo, SecretStatus, WebConfig } from './types';
+import type {
+  HistoricalReport,
+  Metadata,
+  OrderRecord,
+  PricingConfig,
+  PublicPricing,
+  ReportHistoryItem,
+  ReportsPayload,
+  RunEvent,
+  RunInfo,
+  SecretStatus,
+  User,
+  WebConfig,
+} from './types';
 import './styles.css';
 
 type Locale = 'en' | 'zh';
@@ -127,6 +146,41 @@ const messages = {
     observationOrder: 'Observation order',
     assumptionChecks: 'Assumptions to confirm',
     noReport: 'No report yet.',
+    loginTitle: 'Sign in',
+    bootstrapTitle: 'Create admin account',
+    username: 'Username',
+    password: 'Password',
+    displayName: 'Display name',
+    initialBalance: 'Initial balance',
+    signIn: 'Sign in',
+    createAdmin: 'Create admin',
+    signOut: 'Sign out',
+    account: 'Account',
+    balance: 'Balance',
+    frozen: 'Frozen',
+    role: 'Role',
+    pricingPublic: 'Pricing',
+    billingMode: 'Billing mode',
+    tokenMultiplier: 'Token multiplier',
+    tokenPrice: 'Token price',
+    fixedCharge: 'Fixed charge',
+    modelOverrides: 'Model price overrides',
+    runCost: 'Run cost',
+    preauth: 'Pre-auth',
+    refund: 'Refund',
+    tokenDetails: 'Token details',
+    inputTokens: 'Input',
+    outputTokens: 'Output',
+    orders: 'Orders',
+    adminBilling: 'Admin / Billing',
+    adminUsers: 'Admin / Users',
+    recharge: 'Recharge',
+    newUser: 'New user',
+    active: 'Active',
+    inactive: 'Inactive',
+    priceSaved: 'Pricing saved',
+    userCreated: 'User created',
+    rechargeDone: 'Recharge completed',
     low: 'Low',
     medium: 'Medium',
     high: 'High',
@@ -233,6 +287,41 @@ const messages = {
     observationOrder: '复盘顺序',
     assumptionChecks: '需要确认的假设',
     noReport: '暂无报告。',
+    loginTitle: '登录',
+    bootstrapTitle: '创建管理员账号',
+    username: '用户名',
+    password: '密码',
+    displayName: '显示名称',
+    initialBalance: '初始余额',
+    signIn: '登录',
+    createAdmin: '创建管理员',
+    signOut: '退出登录',
+    account: '账号',
+    balance: '余额',
+    frozen: '冻结',
+    role: '权限',
+    pricingPublic: '价格公示',
+    billingMode: '计费模式',
+    tokenMultiplier: '消耗倍数',
+    tokenPrice: 'Token 单价',
+    fixedCharge: '按次费用',
+    modelOverrides: '模型组合价格',
+    runCost: '本次费用',
+    preauth: '预冻结',
+    refund: '退回',
+    tokenDetails: 'Token 明细',
+    inputTokens: '输入',
+    outputTokens: '输出',
+    orders: '订单',
+    adminBilling: '管理员 / 计费',
+    adminUsers: '管理员 / 用户',
+    recharge: '充值',
+    newUser: '新建用户',
+    active: '启用',
+    inactive: '禁用',
+    priceSaved: '价格已保存',
+    userCreated: '用户已创建',
+    rechargeDone: '充值完成',
     low: '低',
     medium: '中',
     high: '高',
@@ -353,10 +442,21 @@ function today() {
 function App() {
   const [locale, setLocale] = useState<Locale>(detectLocale);
   const [activeView, setActiveView] = useState<ViewMode>('workspace');
+  const [authChecked, setAuthChecked] = useState(false);
+  const [bootstrapRequired, setBootstrapRequired] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [metadata, setMetadata] = useState<Metadata>(emptyMetadata);
   const [config, setConfig] = useState<WebConfig | null>(null);
   const [tickerList, setTickerList] = useState('');
   const [secretStatus, setSecretStatus] = useState<SecretStatus>({});
+  const [publicPricing, setPublicPricing] = useState<PublicPricing | null>(null);
+  const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [adminUsers, setAdminUsers] = useState<User[]>([]);
+  const [adminPricing, setAdminPricing] = useState<PricingConfig | null>(null);
+  const [modelPriceDraft, setModelPriceDraft] = useState('');
+  const [adminOrders, setAdminOrders] = useState<OrderRecord[]>([]);
+  const [newUserDraft, setNewUserDraft] = useState({ username: '', password: '', displayName: '', role: 'user' as 'admin' | 'user', initialBalance: '0' });
+  const [rechargeDraft, setRechargeDraft] = useState<Record<string, string>>({});
   const [secretDraft, setSecretDraft] = useState<Record<string, string>>({});
   const [discoveredModels, setDiscoveredModels] = useState<Record<string, Array<{ label: string; value: string }>>>({});
   const [activeRun, setActiveRun] = useState<RunInfo | null>(null);
@@ -368,30 +468,70 @@ function App() {
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
   const [reportTab, setReportTab] = useState('finalReport');
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [isSaving, setSaving] = useState(false);
   const [isRunning, setRunning] = useState(false);
   const [isFetchingModels, setFetchingModels] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
 
   const t = messages[locale];
+  const isAdmin = currentUser?.role === 'admin';
+
+  async function loadWorkspaceData(user: User) {
+    setError(null);
+    const [metadataValue, configValue, pricingValue, historyValue, activeRunsValue, orderValue] = await Promise.all([
+      api.metadata(),
+      api.config(),
+      api.publicPricing(),
+      api.reportHistory(),
+      api.runs(true),
+      api.orders(),
+    ]);
+    setMetadata({ ...emptyMetadata, ...metadataValue });
+    setConfig(configValue);
+    setTickerList(configValue.ticker);
+    setPublicPricing(pricingValue);
+    setHistory(historyValue.items);
+    setOrders(orderValue.orders);
+    if (user.role === 'admin') {
+      const [secretValue, pricingConfig, usersValue, adminOrderValue] = await Promise.all([
+        api.secretStatus(),
+        api.adminPricing(),
+        api.adminUsers(),
+        api.adminOrders(),
+      ]);
+      setSecretStatus(secretValue);
+      setAdminPricing(pricingConfig);
+      setModelPriceDraft(JSON.stringify(pricingConfig.modelPriceOverrides ?? {}, null, 2));
+      setAdminUsers(usersValue.users);
+      setAdminOrders(adminOrderValue.orders);
+    } else {
+      setSecretStatus({});
+      setAdminPricing(null);
+      setModelPriceDraft('');
+      setAdminUsers([]);
+      setAdminOrders([]);
+    }
+    if (activeRunsValue.runs.length > 0) {
+      const activeRuns = [...activeRunsValue.runs].sort((a, b) => a.submittedAt.localeCompare(b.submittedAt));
+      setBatchRuns(activeRuns);
+      setActiveRun(activeRuns[0]);
+      setRunning(true);
+      attachEvents(activeRuns[0].id, activeRuns, 0);
+    }
+  }
 
   useEffect(() => {
-    Promise.all([api.metadata(), api.config(), api.secretStatus(), api.reportHistory(), api.runs(true)])
-      .then(([metadataValue, configValue, secretValue, historyValue, activeRunsValue]) => {
-        setMetadata({ ...emptyMetadata, ...metadataValue });
-        setConfig(configValue);
-        setTickerList(configValue.ticker);
-        setSecretStatus(secretValue);
-        setHistory(historyValue.items);
-        if (activeRunsValue.runs.length > 0) {
-          const activeRuns = [...activeRunsValue.runs].sort((a, b) => a.submittedAt.localeCompare(b.submittedAt));
-          setBatchRuns(activeRuns);
-          setActiveRun(activeRuns[0]);
-          setRunning(true);
-          attachEvents(activeRuns[0].id, activeRuns, 0);
-        }
+    api.bootstrapStatus()
+      .then(async (status) => {
+        setBootstrapRequired(status.required);
+        if (status.required) return;
+        const session = await api.me();
+        setCurrentUser(session.user);
+        await loadWorkspaceData(session.user);
       })
-      .catch((err) => setError(err.message));
+      .catch(() => undefined)
+      .finally(() => setAuthChecked(true));
   }, []);
 
   useEffect(() => {
@@ -412,6 +552,106 @@ function App() {
   function changeLocale(value: Locale) {
     setLocale(value);
     window.localStorage.setItem('tradingagents-webui-locale', value);
+  }
+
+  async function handleAuthenticated(sessionUser: User) {
+    setCurrentUser(sessionUser);
+    setBootstrapRequired(false);
+    await loadWorkspaceData(sessionUser);
+  }
+
+  async function signOut() {
+    await api.logout().catch(() => undefined);
+    eventSourceRef.current?.close();
+    setCurrentUser(null);
+    setConfig(null);
+    setActiveRun(null);
+    setBatchRuns([]);
+    setEvents([]);
+    setReports(null);
+    setOrders([]);
+    setAdminUsers([]);
+    setActiveView('workspace');
+  }
+
+  async function refreshAccountAndBilling() {
+    const [session, orderValue, pricingValue] = await Promise.all([api.me(), api.orders(), api.publicPricing()]);
+    setCurrentUser(session.user);
+    setOrders(orderValue.orders);
+    setPublicPricing(pricingValue);
+    if (session.user.role === 'admin') {
+      const [usersValue, adminOrderValue, pricingConfig] = await Promise.all([api.adminUsers(), api.adminOrders(), api.adminPricing()]);
+      setAdminUsers(usersValue.users);
+      setAdminOrders(adminOrderValue.orders);
+      setAdminPricing(pricingConfig);
+      setModelPriceDraft(JSON.stringify(pricingConfig.modelPriceOverrides ?? {}, null, 2));
+    }
+  }
+
+  function updateAdminPricing<K extends keyof PricingConfig>(key: K, value: PricingConfig[K]) {
+    setAdminPricing((current) => (current ? { ...current, [key]: value } : current));
+  }
+
+  function updateDepthPrice(kind: 'depthMultipliers' | 'fixedPricesByDepth' | 'estimatedInputTokensByDepth' | 'estimatedOutputTokensByDepth', depth: '1' | '3' | '5', value: string) {
+    setAdminPricing((current) => {
+      if (!current) return current;
+      const next = { ...current[kind] } as Record<string, string | number>;
+      next[depth] = kind.startsWith('estimated') ? clampNumber(value, 0, 20_000_000) : value;
+      return { ...current, [kind]: next };
+    });
+  }
+
+  async function saveAdminPricing() {
+    if (!adminPricing) return;
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const overrides = JSON.parse(modelPriceDraft || '{}') as PricingConfig['modelPriceOverrides'];
+      const saved = await api.adminSavePricing({ ...adminPricing, modelPriceOverrides: overrides });
+      setAdminPricing(saved);
+      setModelPriceDraft(JSON.stringify(saved.modelPriceOverrides ?? {}, null, 2));
+      setPublicPricing(await api.publicPricing());
+      setNotice(t.priceSaved);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function createAdminManagedUser() {
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await api.adminCreateUser({ ...newUserDraft, displayName: newUserDraft.displayName || null, isActive: true });
+      setNewUserDraft({ username: '', password: '', displayName: '', role: 'user', initialBalance: '0' });
+      await refreshAccountAndBilling();
+      setNotice(t.userCreated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function rechargeUser(userId: string) {
+    const amount = rechargeDraft[userId];
+    if (!amount) return;
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await api.adminRechargeUser(userId, { amount, note: 'Manual WebUI recharge' });
+      setRechargeDraft((current) => ({ ...current, [userId]: '' }));
+      await refreshAccountAndBilling();
+      setNotice(t.rechargeDone);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
   }
 
   const provider = useMemo(
@@ -603,8 +843,8 @@ function App() {
     setViewedArchive(null);
     setBatchRuns([]);
     try {
-      const saved = await api.saveConfig(runConfig);
-      setConfig(saved);
+      const saved = isAdmin ? await api.saveConfig(runConfig) : runConfig;
+      if (isAdmin) setConfig(saved);
       if (tickers.length > 1) {
         const batch = await api.createBatchRuns(tickers, saved);
         setBatchRuns(batch.runs);
@@ -638,6 +878,7 @@ function App() {
       api.runs(true).then((value) => {
         if (value.runs.length === 0) setRunning(false);
       }).catch(() => undefined);
+      refreshAccountAndBilling().catch(() => undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -671,6 +912,7 @@ function App() {
             }
             setRunning(false);
             api.reportHistory().then((value) => setHistory(value.items)).catch(() => undefined);
+            refreshAccountAndBilling().catch(() => undefined);
           }
         });
       }
@@ -719,6 +961,23 @@ function App() {
     }
   }
 
+  if (!authChecked) {
+    return (
+      <main className="boot">
+        <Loader2 className="spin" size={26} />
+        <span>{t.loading}</span>
+      </main>
+    );
+  }
+
+  if (bootstrapRequired) {
+    return <AuthScreen mode="bootstrap" locale={locale} labels={t} onLocaleChange={changeLocale} onAuthenticated={handleAuthenticated} />;
+  }
+
+  if (!currentUser) {
+    return <AuthScreen mode="login" locale={locale} labels={t} onLocaleChange={changeLocale} onAuthenticated={handleAuthenticated} />;
+  }
+
   if (!config) {
     return (
       <main className="boot">
@@ -747,6 +1006,7 @@ function App() {
         }
       : reports;
   const displayedRun = selectedHistoryId && viewedArchive ? viewedArchive.run : activeRun;
+  const runBilling = displayedRun?.billing ?? activeRun?.billing ?? null;
   const reportEntries = displayedReports?.reports ? Object.entries(displayedReports.reports) : [];
   const backtestObservation = buildBacktestObservation(displayedReports, displayedRun, outputLocale);
 
@@ -762,10 +1022,12 @@ function App() {
             <button className={activeView === 'workspace' ? 'active' : ''} onClick={() => setActiveView('workspace')}>
               {t.workspace}
             </button>
-            <button className={activeView === 'settings' ? 'active' : ''} onClick={() => setActiveView('settings')}>
-              <Settings2 size={14} />
-              {t.settings}
-            </button>
+            {isAdmin && (
+              <button className={activeView === 'settings' ? 'active' : ''} onClick={() => setActiveView('settings')}>
+                <Settings2 size={14} />
+                {t.settings}
+              </button>
+            )}
           </div>
           <div className="locale-switch" aria-label="Interface language">
             <button className={locale === 'en' ? 'active' : ''} onClick={() => changeLocale('en')}>
@@ -779,6 +1041,13 @@ function App() {
             <CircleDot size={14} />
             {statusLabel(activeRun?.status ?? 'idle', locale)}
           </span>
+          <span className="account-pill">
+            <Wallet size={14} />
+            {currentUser.username} · {formatMoney(currentUser.balance, publicPricing?.currency)}
+          </span>
+          <button className="secondary" onClick={signOut}>
+            {t.signOut}
+          </button>
           <button className="primary" onClick={startRun} disabled={isRunning}>
             {isRunning ? <Loader2 className="spin" size={17} /> : <Play size={17} />}
             {t.runAnalysis}
@@ -798,8 +1067,14 @@ function App() {
           <span>{error}</span>
         </div>
       )}
+      {notice && (
+        <div className="notice">
+          <Check size={18} />
+          <span>{notice}</span>
+        </div>
+      )}
 
-      {activeView === 'settings' ? (
+      {activeView === 'settings' && isAdmin ? (
         <section className="settings-grid">
           <section className="settings-main">
             <Panel title={t.connectionSettings} icon={<Settings2 size={17} />}>
@@ -1030,6 +1305,113 @@ function App() {
           </section>
 
           <aside className="settings-side">
+            <Panel title={t.adminBilling} icon={<CreditCard size={17} />}>
+              {adminPricing ? (
+                <div className="billing-form">
+                  <div className="form-grid billing-grid">
+                    <label className="field">
+                      <span>{t.billingMode}</span>
+                      <select value={adminPricing.billingMode} onChange={(event) => updateAdminPricing('billingMode', event.target.value as PricingConfig['billingMode'])}>
+                        <option value="token">token</option>
+                        <option value="per_run">per_run</option>
+                        <option value="hybrid">hybrid</option>
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>{t.tokenMultiplier}</span>
+                      <input value={adminPricing.tokenMultiplier} onChange={(event) => updateAdminPricing('tokenMultiplier', event.target.value)} inputMode="decimal" />
+                    </label>
+                    <label className="field">
+                      <span>{t.inputTokens} / 1M</span>
+                      <input value={adminPricing.inputTokenPricePer1m} onChange={(event) => updateAdminPricing('inputTokenPricePer1m', event.target.value)} inputMode="decimal" />
+                    </label>
+                    <label className="field">
+                      <span>{t.outputTokens} / 1M</span>
+                      <input value={adminPricing.outputTokenPricePer1m} onChange={(event) => updateAdminPricing('outputTokenPricePer1m', event.target.value)} inputMode="decimal" />
+                    </label>
+                    <label className="field">
+                      <span>{t.fixedCharge}</span>
+                      <input value={adminPricing.fixedRunPrice} onChange={(event) => updateAdminPricing('fixedRunPrice', event.target.value)} inputMode="decimal" />
+                    </label>
+                    <label className="field">
+                      <span>{t.preauth}</span>
+                      <input value={adminPricing.preauthMultiplier} onChange={(event) => updateAdminPricing('preauthMultiplier', event.target.value)} inputMode="decimal" />
+                    </label>
+                  </div>
+                  <div className="depth-price-grid">
+                    {(['1', '3', '5'] as const).map((depth) => (
+                      <section key={depth} className="depth-price-card">
+                        <strong>{researchDepthLabel(Number(depth), depth, locale)}</strong>
+                        <label className="field">
+                          <span>{t.tokenMultiplier}</span>
+                          <input value={adminPricing.depthMultipliers[depth] ?? '1'} onChange={(event) => updateDepthPrice('depthMultipliers', depth, event.target.value)} inputMode="decimal" />
+                        </label>
+                        <label className="field">
+                          <span>{t.fixedCharge}</span>
+                          <input value={adminPricing.fixedPricesByDepth[depth] ?? '0'} onChange={(event) => updateDepthPrice('fixedPricesByDepth', depth, event.target.value)} inputMode="decimal" />
+                        </label>
+                        <label className="field">
+                          <span>{t.inputTokens}</span>
+                          <input value={adminPricing.estimatedInputTokensByDepth[depth] ?? 0} onChange={(event) => updateDepthPrice('estimatedInputTokensByDepth', depth, event.target.value)} inputMode="numeric" />
+                        </label>
+                        <label className="field">
+                          <span>{t.outputTokens}</span>
+                          <input value={adminPricing.estimatedOutputTokensByDepth[depth] ?? 0} onChange={(event) => updateDepthPrice('estimatedOutputTokensByDepth', depth, event.target.value)} inputMode="numeric" />
+                        </label>
+                      </section>
+                    ))}
+                  </div>
+                  <label className="field">
+                    <span>{t.modelOverrides}</span>
+                    <textarea
+                      value={modelPriceDraft}
+                      onChange={(event) => setModelPriceDraft(event.target.value)}
+                      spellCheck={false}
+                    />
+                  </label>
+                  <button className="secondary full" onClick={saveAdminPricing} disabled={isSaving}>
+                    <Save size={16} />
+                    {t.saveDefaults}
+                  </button>
+                </div>
+              ) : (
+                <span className="empty">-</span>
+              )}
+            </Panel>
+
+            <Panel title={t.adminUsers} icon={<Users size={17} />}>
+              <div className="new-user-grid">
+                <input placeholder={t.username} value={newUserDraft.username} onChange={(event) => setNewUserDraft((current) => ({ ...current, username: event.target.value }))} />
+                <input placeholder={t.password} type="password" value={newUserDraft.password} onChange={(event) => setNewUserDraft((current) => ({ ...current, password: event.target.value }))} />
+                <input placeholder={t.initialBalance} value={newUserDraft.initialBalance} onChange={(event) => setNewUserDraft((current) => ({ ...current, initialBalance: event.target.value }))} />
+                <select value={newUserDraft.role} onChange={(event) => setNewUserDraft((current) => ({ ...current, role: event.target.value as 'admin' | 'user' }))}>
+                  <option value="user">user</option>
+                  <option value="admin">admin</option>
+                </select>
+                <button className="secondary" onClick={createAdminManagedUser} disabled={isSaving}>
+                  <UserPlus size={16} />
+                  {t.newUser}
+                </button>
+              </div>
+              <div className="user-list">
+                {adminUsers.map((user) => (
+                  <section key={user.id} className="user-row">
+                    <div>
+                      <strong>{user.username}</strong>
+                      <small>{user.role} · {formatMoney(user.balance, publicPricing?.currency)} · {t.frozen} {formatMoney(user.frozenBalance, publicPricing?.currency)}</small>
+                    </div>
+                    <div className="recharge-row">
+                      <input placeholder={t.recharge} value={rechargeDraft[user.id] ?? ''} onChange={(event) => setRechargeDraft((current) => ({ ...current, [user.id]: event.target.value }))} inputMode="decimal" />
+                      <button className="secondary" onClick={() => rechargeUser(user.id)} disabled={isSaving}>
+                        <Wallet size={15} />
+                        {t.recharge}
+                      </button>
+                    </div>
+                  </section>
+                ))}
+              </div>
+            </Panel>
+
             <Panel title={t.setupRecommendations} icon={<Lightbulb size={17} />}>
               <div className="recommendation-list">
                 {setupRecommendations.map((item) => (
@@ -1124,6 +1506,11 @@ function App() {
             </div>
           </div>
           <Metric label={t.configuredAgents} value={`${config.analysts.length} / ${metadata.analysts.length || 4}`} />
+          <div className="overview-card price-card">
+            <span>{t.pricingPublic}</span>
+            <strong>{publicPricing ? `${publicPricing.billingMode} · x${publicPricing.tokenMultiplier}` : '-'}</strong>
+            <small>{publicPricing ? `${t.tokenPrice}: ${formatMoney(publicPricing.inputTokenPricePer1m, publicPricing.currency)}/${formatMoney(publicPricing.outputTokenPricePer1m, publicPricing.currency)} · ${t.fixedCharge}: ${formatMoney(publicPricing.fixedRunPrice, publicPricing.currency)}` : '-'}</small>
+          </div>
           <Metric label={t.dataRouteCount} value={customRouteCount} />
           <Metric label={t.estimateTotal} value={timeEstimate.totalSeconds ? formatDuration(timeEstimate.totalSeconds, locale) : t.estimateWaiting} />
           <Metric label={t.estimateRemaining} value={timeEstimate.remainingSeconds != null ? formatDuration(timeEstimate.remainingSeconds, locale) : '-'} />
@@ -1155,23 +1542,25 @@ function App() {
                   onChange={(event) => updateConfig('analysisDate', event.target.value)}
                 />
               </label>
-              <label className="field">
-                <span>{t.provider}</span>
-                <select
-                  value={config.llmProvider}
-                  onChange={(event) => changeProvider(event.target.value)}
-                >
-                  {metadata.providers.map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {isAdmin && (
+                <label className="field">
+                  <span>{t.provider}</span>
+                  <select
+                    value={config.llmProvider}
+                    onChange={(event) => changeProvider(event.target.value)}
+                  >
+                    {metadata.providers.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
 
-            <div className="tool-row">
-              {customNeedsManualModel ? (
+            <div className={isAdmin ? 'tool-row' : 'tool-row single-control'}>
+              {isAdmin && (customNeedsManualModel ? (
                 <>
                   <label className="field">
                     <span>{t.quickModel}</span>
@@ -1207,7 +1596,7 @@ function App() {
                     onChange={(value) => updateConfig('deepThinkLlm', value)}
                   />
                 </>
-              )}
+              ))}
               <Selector
                 icon={<Gauge size={16} />}
                 label={t.depth}
@@ -1234,59 +1623,63 @@ function App() {
               ))}
             </div>
 
-            <div className="advanced-grid">
-              <label className="field">
-                <span>{t.openaiReasoning}</span>
-                <select value={config.openaiReasoningEffort ?? ''} onChange={(event) => updateConfig('openaiReasoningEffort', event.target.value || null)}>
-                  <option value="">{t.providerDefault}</option>
-                  <option value="low">{t.low}</option>
-                  <option value="medium">{t.medium}</option>
-                  <option value="high">{t.high}</option>
-                </select>
-              </label>
-              <label className="field">
-                <span>{t.geminiThinking}</span>
-                <select value={config.googleThinkingLevel ?? ''} onChange={(event) => updateConfig('googleThinkingLevel', event.target.value || null)}>
-                  <option value="">{t.providerDefault}</option>
-                  <option value="minimal">{t.minimal}</option>
-                  <option value="high">{t.high}</option>
-                </select>
-              </label>
-              <label className="field">
-                <span>{t.anthropicEffort}</span>
-                <select value={config.anthropicEffort ?? ''} onChange={(event) => updateConfig('anthropicEffort', event.target.value || null)}>
-                  <option value="">{t.providerDefault}</option>
-                  <option value="low">{t.low}</option>
-                  <option value="medium">{t.medium}</option>
-                  <option value="high">{t.high}</option>
-                </select>
-              </label>
-              <label className="field">
-                <span>{t.parallelRuns}</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={8}
-                  value={config.maxParallelRuns}
-                  onChange={(event) => updateConfig('maxParallelRuns', clampNumber(event.target.value, 1, 8))}
-                />
-              </label>
-              <label className="toggle-row">
-                <input
-                  type="checkbox"
-                  checked={config.checkpointEnabled}
-                  onChange={(event) => updateConfig('checkpointEnabled', event.target.checked)}
-                />
-                <span>{t.checkpointResume}</span>
-              </label>
-            </div>
+            {isAdmin && (
+              <>
+                <div className="advanced-grid">
+                  <label className="field">
+                    <span>{t.openaiReasoning}</span>
+                    <select value={config.openaiReasoningEffort ?? ''} onChange={(event) => updateConfig('openaiReasoningEffort', event.target.value || null)}>
+                      <option value="">{t.providerDefault}</option>
+                      <option value="low">{t.low}</option>
+                      <option value="medium">{t.medium}</option>
+                      <option value="high">{t.high}</option>
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>{t.geminiThinking}</span>
+                    <select value={config.googleThinkingLevel ?? ''} onChange={(event) => updateConfig('googleThinkingLevel', event.target.value || null)}>
+                      <option value="">{t.providerDefault}</option>
+                      <option value="minimal">{t.minimal}</option>
+                      <option value="high">{t.high}</option>
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>{t.anthropicEffort}</span>
+                    <select value={config.anthropicEffort ?? ''} onChange={(event) => updateConfig('anthropicEffort', event.target.value || null)}>
+                      <option value="">{t.providerDefault}</option>
+                      <option value="low">{t.low}</option>
+                      <option value="medium">{t.medium}</option>
+                      <option value="high">{t.high}</option>
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>{t.parallelRuns}</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={8}
+                      value={config.maxParallelRuns}
+                      onChange={(event) => updateConfig('maxParallelRuns', clampNumber(event.target.value, 1, 8))}
+                    />
+                  </label>
+                  <label className="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={config.checkpointEnabled}
+                      onChange={(event) => updateConfig('checkpointEnabled', event.target.checked)}
+                    />
+                    <span>{t.checkpointResume}</span>
+                  </label>
+                </div>
 
-            <div className="actions-row">
-              <button className="secondary" onClick={saveConfig} disabled={isSaving}>
-                <Save size={16} />
-                {t.saveDefaults}
-              </button>
-            </div>
+                <div className="actions-row">
+                  <button className="secondary" onClick={saveConfig} disabled={isSaving}>
+                    <Save size={16} />
+                    {t.saveDefaults}
+                  </button>
+                </div>
+              </>
+            )}
             {batchRuns.length > 0 && (
               <div className="batch-queue">
                 <div className="section-title">
@@ -1319,8 +1712,12 @@ function App() {
             <div className="metrics-row">
               <Metric label={t.llmCalls} value={progress?.stats?.llm_calls ?? activeRun?.stats?.llm_calls ?? 0} />
               <Metric label={t.toolCalls} value={progress?.stats?.tool_calls ?? activeRun?.stats?.tool_calls ?? 0} />
+              <Metric label={t.inputTokens} value={runBilling?.usage.inputTokens ?? progress?.stats?.tokens_in ?? activeRun?.stats?.tokens_in ?? 0} />
+              <Metric label={t.outputTokens} value={runBilling?.usage.outputTokens ?? progress?.stats?.tokens_out ?? activeRun?.stats?.tokens_out ?? 0} />
+              <Metric label={t.runCost} value={runBilling ? formatMoney(runBilling.actualAmount, runBilling.currency) : '-'} />
+              <Metric label={t.preauth} value={runBilling ? formatMoney(runBilling.preauthorizedAmount, runBilling.currency) : '-'} />
+              <Metric label={t.balance} value={runBilling?.balanceAfter ? formatMoney(runBilling.balanceAfter, runBilling.currency) : formatMoney(currentUser.balance, publicPricing?.currency)} />
               <Metric label={t.elapsed} value={`${progress?.elapsedSeconds ?? 0}s`} />
-              <Metric label={t.estimateTotal} value={timeEstimate.totalSeconds ? formatDuration(timeEstimate.totalSeconds, outputLocale) : t.estimateWaiting} />
             </div>
             <div className="timeline-estimate">
               <div className="estimate-bar" aria-hidden="true">
@@ -1355,6 +1752,24 @@ function App() {
                 </button>
               ))}
               {history.length === 0 && <span className="empty">{t.historyEmpty}</span>}
+            </div>
+          </Panel>
+
+          <Panel title={t.orders} icon={<ReceiptText size={17} />}>
+            <div className="order-list">
+              {orders.slice(0, 8).map((order) => (
+                <div key={order.id} className="order-row">
+                  <span>
+                    <strong>{order.type}</strong>
+                    <small>{order.status} · {new Date(order.createdAt).toLocaleString()}</small>
+                  </span>
+                  <span>
+                    <em>{formatMoney(order.actualAmount || order.amount || order.frozenAmount, order.currency)}</em>
+                    <small>{order.runId ? order.runId.slice(0, 8) : order.externalOrderId ?? '-'}</small>
+                  </span>
+                </div>
+              ))}
+              {orders.length === 0 && <span className="empty">{t.orders}: -</span>}
             </div>
           </Panel>
 
@@ -1408,6 +1823,95 @@ function App() {
         </aside>
         </section>
       )}
+    </main>
+  );
+}
+
+function AuthScreen({
+  mode,
+  locale,
+  labels,
+  onLocaleChange,
+  onAuthenticated,
+}: {
+  mode: 'login' | 'bootstrap';
+  locale: Locale;
+  labels: Record<string, string>;
+  onLocaleChange: (locale: Locale) => void;
+  onAuthenticated: (user: User) => Promise<void>;
+}) {
+  const [username, setUsername] = useState(mode === 'bootstrap' ? 'admin' : '');
+  const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [initialBalance, setInitialBalance] = useState('100.00');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      const session =
+        mode === 'bootstrap'
+          ? await api.bootstrap({ username, password, displayName: displayName || null, initialBalance })
+          : await api.login(username, password);
+      await onAuthenticated(session.user);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <main className="auth-shell" lang={locale === 'zh' ? 'zh-CN' : 'en'}>
+      <form className="auth-card" onSubmit={submit}>
+        <div className="auth-card-head">
+          <div>
+            <p className="eyebrow">{labels.eyebrow}</p>
+            <h1>{mode === 'bootstrap' ? labels.bootstrapTitle : labels.loginTitle}</h1>
+          </div>
+          <div className="locale-switch" aria-label="Interface language">
+            <button type="button" className={locale === 'en' ? 'active' : ''} onClick={() => onLocaleChange('en')}>
+              EN
+            </button>
+            <button type="button" className={locale === 'zh' ? 'active' : ''} onClick={() => onLocaleChange('zh')}>
+              中文
+            </button>
+          </div>
+        </div>
+        {error && (
+          <div className="alert compact">
+            <CircleAlert size={18} />
+            <span>{error}</span>
+          </div>
+        )}
+        <label className="field">
+          <span>{labels.username}</span>
+          <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />
+        </label>
+        <label className="field">
+          <span>{labels.password}</span>
+          <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === 'bootstrap' ? 'new-password' : 'current-password'} />
+        </label>
+        {mode === 'bootstrap' && (
+          <>
+            <label className="field">
+              <span>{labels.displayName}</span>
+              <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+            </label>
+            <label className="field">
+              <span>{labels.initialBalance}</span>
+              <input value={initialBalance} onChange={(event) => setInitialBalance(event.target.value)} inputMode="decimal" />
+            </label>
+          </>
+        )}
+        <button className="primary full" type="submit" disabled={loading}>
+          {loading ? <Loader2 className="spin" size={17} /> : mode === 'bootstrap' ? <UserPlus size={17} /> : <LogIn size={17} />}
+          {mode === 'bootstrap' ? labels.createAdmin : labels.signIn}
+        </button>
+      </form>
     </main>
   );
 }
@@ -1526,6 +2030,12 @@ function formatDuration(seconds: number, locale: Locale) {
   if (minutes <= 0) return locale === 'zh' ? `${remainingSeconds}秒` : `${remainingSeconds}s`;
   if (remainingSeconds === 0) return locale === 'zh' ? `${minutes}分` : `${minutes}m`;
   return locale === 'zh' ? `${minutes}分${remainingSeconds}秒` : `${minutes}m ${remainingSeconds}s`;
+}
+
+function formatMoney(value: string | number | null | undefined, currency = 'USD') {
+  const amount = Number(value ?? 0);
+  if (!Number.isFinite(amount)) return `0.000000 ${currency}`;
+  return `${amount.toFixed(6)} ${currency}`;
 }
 
 function confidenceLabel(value: 'low' | 'medium' | 'high', locale: Locale) {
