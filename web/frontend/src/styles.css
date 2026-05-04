@@ -107,7 +107,8 @@ h2 {
   flex-wrap: wrap;
 }
 
-.locale-switch {
+.locale-switch,
+.view-switch {
   display: inline-flex;
   align-items: center;
   height: 36px;
@@ -117,7 +118,8 @@ h2 {
   border-radius: 8px;
 }
 
-.locale-switch button {
+.locale-switch button,
+.view-switch button {
   height: 28px;
   border: 0;
   border-radius: 6px;
@@ -126,9 +128,13 @@ h2 {
   padding: 0 9px;
   font-size: 12px;
   font-weight: 760;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
-.locale-switch button.active {
+.locale-switch button.active,
+.view-switch button.active {
   background: #24383a;
   color: #f2fffb;
 }
@@ -208,9 +214,22 @@ h2 {
   align-items: start;
 }
 
+.workspace-view {
+  grid-template-columns: minmax(0, 1fr) 440px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
+  gap: 14px;
+  align-items: start;
+}
+
 .left-rail,
 .main-column,
-.right-rail {
+.right-rail,
+.settings-main,
+.settings-side {
   display: grid;
   gap: 14px;
 }
@@ -245,6 +264,14 @@ h2 {
 .advanced-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-top: 14px;
+}
+
+.settings-form {
+  grid-template-columns: minmax(0, 1fr) 130px minmax(0, 1.4fr);
+}
+
+.field.wide {
+  grid-column: span 1;
 }
 
 .field,
@@ -294,6 +321,14 @@ button:focus-visible {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 170px;
   gap: 12px;
   margin-top: 14px;
+}
+
+.settings-model-row {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 150px;
+}
+
+.model-fetch-button {
+  align-self: end;
 }
 
 .section-title {
@@ -388,6 +423,10 @@ button:focus-visible {
 
 .secret-row {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.provider-secret {
+  margin-top: 12px;
 }
 
 .secret-row span {
@@ -637,6 +676,11 @@ button:focus-visible {
     grid-template-columns: 300px minmax(0, 1fr);
   }
 
+  .workspace-view,
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
   .right-rail {
     grid-column: 1 / -1;
     grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
@@ -654,13 +698,16 @@ button:focus-visible {
   }
 
   .workspace-grid,
-  .right-rail {
+  .right-rail,
+  .settings-grid {
     grid-template-columns: 1fr;
   }
 
   .form-grid,
   .advanced-grid,
   .tool-row,
+  .settings-form,
+  .settings-model-row,
   .agent-grid,
   .metrics-row,
   .endpoint-grid {

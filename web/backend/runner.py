@@ -23,7 +23,12 @@ from cli.stats_handler import StatsCallbackHandler
 from tradingagents.graph.checkpointer import clear_checkpoint, get_checkpointer, thread_id
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 
-from .constants import CUSTOM_OPENAI_PROVIDER
+from .constants import (
+    CUSTOM_OPENAI_PROVIDER,
+    OPENAI_COMPATIBLE_ADAPTER_PROVIDERS,
+    provider_default_base_url,
+    provider_secret_field,
+)
 from .custom_data import configure_custom_data_interfaces
 from .schemas import RunInfo, RunReports, RunRequest, WebConfig
 from .storage import WebStorage
@@ -144,12 +149,16 @@ class RunManager:
             secrets = self.storage.load_secrets()
             self.storage.load_secrets_into_env()
             runtime_config = self.storage.runtime_config(run.config)
-            if run.config.llm_provider == CUSTOM_OPENAI_PROVIDER:
-                runtime_config["llm_provider"] = "openrouter"
-                runtime_config["backend_url"] = run.config.backend_url
-                custom_key = secrets.get("CUSTOM_OPENAI_API_KEY")
+            if run.config.llm_provider == CUSTOM_OPENAI_PROVIDER or run.config.llm_provider in OPENAI_COMPATIBLE_ADAPTER_PROVIDERS:
+                api_key_field = provider_secret_field(run.config.llm_provider)
+                custom_key = secrets.get(api_key_field) if api_key_field else None
                 if not custom_key:
-                    raise RuntimeError("CUSTOM_OPENAI_API_KEY is required for Custom OpenAI-compatible provider.")
+                    raise RuntimeError(f"{api_key_field} is required for {run.config.llm_provider} provider.")
+                backend_url = run.config.backend_url or provider_default_base_url(run.config.llm_provider)
+                if not backend_url:
+                    raise RuntimeError(f"Base URL is required for {run.config.llm_provider} provider.")
+                runtime_config["llm_provider"] = "openrouter"
+                runtime_config["backend_url"] = backend_url
                 os.environ["OPENROUTER_API_KEY"] = custom_key
             configure_custom_data_interfaces(runtime_config, secrets.get("CUSTOM_DATA_API_KEY"))
             stats_handler = StatsCallbackHandler()
@@ -259,7 +268,7 @@ class RunManager:
         finally:
             if checkpointer_ctx is not None:
                 checkpointer_ctx.__exit__(None, None, None)
-            if run.config.llm_provider == CUSTOM_OPENAI_PROVIDER:
+            if run.config.llm_provider == CUSTOM_OPENAI_PROVIDER or run.config.llm_provider in OPENAI_COMPATIBLE_ADAPTER_PROVIDERS:
                 if original_openrouter_key is None:
                     os.environ.pop("OPENROUTER_API_KEY", None)
                 else:

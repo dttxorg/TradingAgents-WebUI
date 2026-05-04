@@ -11,8 +11,9 @@ import web.backend.app as app_module
 from web.backend.app import app
 from web.backend.constants import CUSTOM_DATA_VENDOR, CUSTOM_OPENAI_PROVIDER, metadata_payload
 from web.backend.custom_data import configure_custom_data_interfaces
+from web.backend.model_discovery import fetch_provider_models
 from web.backend.runner import RunManager
-from web.backend.schemas import RunInfo, RunReports, RunRequest, WebConfig
+from web.backend.schemas import ModelFetchRequest, RunInfo, RunReports, RunRequest, WebConfig
 from web.backend.storage import WebStorage, mask_secret
 
 
@@ -21,14 +22,17 @@ def test_metadata_exposes_configurable_catalogs():
 
     assert any(provider["value"] == "openai" for provider in payload["providers"])
     assert any(provider["value"] == CUSTOM_OPENAI_PROVIDER for provider in payload["providers"])
+    assert any(provider["value"] == "moonshot" and provider["apiKeyField"] == "MOONSHOT_API_KEY" for provider in payload["providers"])
     assert any(language["value"] == "Chinese" for language in payload["languages"])
     assert "openai" in payload["models"]
     assert CUSTOM_OPENAI_PROVIDER in payload["models"]
+    assert "moonshot" in payload["models"]
     assert payload["dataVendorCategories"]
     assert all(CUSTOM_DATA_VENDOR in category["options"] for category in payload["dataVendorCategories"])
     assert any(method["method"] == "get_news" for method in payload["customDataMethods"])
     assert "CUSTOM_OPENAI_API_KEY" in payload["secretFields"]
     assert "CUSTOM_DATA_API_KEY" in payload["secretFields"]
+    assert "MOONSHOT_API_KEY" in payload["secretFields"]
 
 
 def test_web_config_normalizes_ticker_and_rejects_future_date():
@@ -175,6 +179,67 @@ def test_custom_data_vendor_posts_to_configured_endpoint(monkeypatch):
     ]
 
 
+def test_model_discovery_fetches_openai_compatible_models(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": [{"id": "moonshot-v1-8k"}, {"id": "moonshot-v1-32k"}]}
+
+    def fake_get(url, headers=None, params=None, timeout=None):
+        calls.append({"url": url, "headers": headers, "params": params, "timeout": timeout})
+        return FakeResponse()
+
+    monkeypatch.setattr("web.backend.model_discovery.requests.get", fake_get)
+
+    response = fetch_provider_models(
+        ModelFetchRequest(provider="moonshot", baseUrl="https://api.moonshot.cn/v1"),
+        {"MOONSHOT_API_KEY": "moonshot-key"},
+    )
+
+    assert [model.value for model in response.models] == ["moonshot-v1-32k", "moonshot-v1-8k"]
+    assert calls == [
+        {
+            "url": "https://api.moonshot.cn/v1/models",
+            "headers": {"Authorization": "Bearer moonshot-key"},
+            "params": None,
+            "timeout": 20,
+        }
+    ]
+
+
+def test_model_discovery_requires_saved_secret():
+    with pytest.raises(ValueError):
+        fetch_provider_models(ModelFetchRequest(provider="moonshot"), {})
+
+
+def test_model_fetch_endpoint_uses_saved_secret(monkeypatch, tmp_path):
+    storage = WebStorage(tmp_path)
+    storage.save_secrets({"MOONSHOT_API_KEY": "moonshot-key"})
+    monkeypatch.setattr(app_module, "storage", storage)
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": [{"id": "moonshot-v1-8k"}]}
+
+    monkeypatch.setattr("web.backend.model_discovery.requests.get", lambda *args, **kwargs: FakeResponse())
+    client = TestClient(app)
+
+    payload = client.post(
+        "/api/models/fetch",
+        json={"provider": "moonshot", "baseUrl": "https://api.moonshot.cn/v1"},
+    ).json()
+
+    assert payload["provider"] == "moonshot"
+    assert payload["models"] == [{"label": "moonshot-v1-8k", "value": "moonshot-v1-8k"}]
+
+
 def test_run_manager_rejects_custom_openai_without_secret(tmp_path):
     storage = WebStorage(tmp_path)
     manager = RunManager(storage)
@@ -199,7 +264,7 @@ def test_run_manager_rejects_custom_openai_without_secret(tmp_path):
         time.sleep(0.02)
 
     assert run.status == "failed"
-    assert run.error == "CUSTOM_OPENAI_API_KEY is required for Custom OpenAI-compatible provider."
+    assert run.error == "CUSTOM_OPENAI_API_KEY is required for custom_openai provider."
 
 
 def test_health_and_metadata_endpoints():

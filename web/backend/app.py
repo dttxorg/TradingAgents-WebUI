@@ -10,10 +10,12 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from requests import RequestException
 
 from .constants import metadata_payload
+from .model_discovery import fetch_provider_models
 from .runner import RunManager
-from .schemas import RunRequest, SecretsUpdate, WebConfig
+from .schemas import ModelFetchRequest, RunRequest, SecretsUpdate, WebConfig
 from .storage import WebStorage
 
 
@@ -62,6 +64,16 @@ def put_secrets(update: SecretsUpdate) -> dict:
         key: value.model_dump(mode="json", by_alias=True)
         for key, value in storage.save_secrets(update.values).items()
     }
+
+
+@app.post("/api/models/fetch")
+def fetch_models(request: ModelFetchRequest) -> dict:
+    try:
+        return fetch_provider_models(request, storage.load_secrets()).model_dump(mode="json", by_alias=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"Model provider request failed: {exc}") from exc
 
 
 @app.post("/api/runs")

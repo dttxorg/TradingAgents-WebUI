@@ -22,6 +22,8 @@ instead of being hard-coded in the React app.
 - Persistent report history for reviewing prior runs and preparing future
   backtesting workflows
 - Custom OpenAI-compatible LLM endpoints and custom HTTP data interfaces
+- Dedicated Settings view for API keys, provider Base URLs, data interfaces,
+  and provider model discovery
 - English and Chinese WebUI with a persistent language switch
 - Docker Compose runtime with persistent logs, cache, memory, secrets, and WebUI
   settings
@@ -64,6 +66,13 @@ configuration snapshot, which gives future backtesting features a stable input
 surface.
 
 ### Custom Interfaces
+
+The Settings view keeps API keys and provider connection details out of the
+daily run workspace. After saving a provider API key, click `Fetch models` to
+load model IDs from providers that expose model discovery. OpenAI-compatible
+providers use `GET {baseUrl}/models`; Google and Anthropic use provider-specific
+model list APIs. If a provider cannot list models, the WebUI falls back to the
+static model choices exposed by `/api/metadata`.
 
 To use an OpenAI-compatible gateway, select `Custom OpenAI-compatible` in the
 settings, enter the gateway Base URL, set the quick/deep model IDs, and save
@@ -115,6 +124,7 @@ TradingAgents-WebUI 是一个面向
 - 报告 Tabs 展示智能体输出、最终报告、统计信息和决策结果
 - 持久化历史报告，方便回看历史运行结果，并为后续回测功能准备数据基础
 - 支持自定义 OpenAI-compatible 模型接口和自定义 HTTP 数据接口
+- 独立 Settings 页面，集中管理 API Key、供应商 Base URL、数据接口和模型拉取
 - WebUI 支持中文和英文界面，并记住用户选择
 - Docker Compose 持久化日志、缓存、记忆、密钥和 WebUI 配置
 
@@ -153,6 +163,12 @@ React 前端会从 `/api/metadata` 读取供应商、模型、语言、分析师
 最终报告、决策结果和不含密钥的配置快照，后续回测功能可以直接复用这层稳定数据。
 
 ### 自定义接口
+
+Settings 页面会把 API Key 和供应商连接配置从日常运行工作台里拆出来。保存供应商
+API Key 后，可以点击 `拉取模型` 从支持模型发现的供应商读取模型 ID。
+OpenAI-compatible 供应商会调用 `GET {baseUrl}/models`；Google 和 Anthropic
+使用各自的模型列表接口。如果供应商不支持自动列模型，WebUI 会回退到
+`/api/metadata` 暴露的静态模型选项。
 
 如果要使用 OpenAI-compatible 网关，在设置里选择 `Custom OpenAI-compatible`，
 填写网关 Base URL、快速/深度模型 ID，并在 API Key 面板保存

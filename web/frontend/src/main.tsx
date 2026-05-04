@@ -16,6 +16,7 @@ import {
   Languages,
   Loader2,
   Play,
+  RefreshCw,
   Save,
   Server,
   Settings2,
@@ -26,6 +27,7 @@ import type { Metadata, ReportHistoryItem, ReportsPayload, RunEvent, RunInfo, Se
 import './styles.css';
 
 type Locale = 'en' | 'zh';
+type ViewMode = 'workspace' | 'settings';
 
 const messages = {
   en: {
@@ -33,6 +35,8 @@ const messages = {
     eyebrow: 'TradingAgents Web Console',
     title: 'Multi-agent market research workspace',
     runAnalysis: 'Run analysis',
+    workspace: 'Workspace',
+    settings: 'Settings',
     connections: 'Settings / API keys',
     notConfigured: 'Not configured',
     replaceValue: 'Replace value',
@@ -43,6 +47,7 @@ const messages = {
     ticker: 'Ticker',
     analysisDate: 'Analysis date',
     provider: 'Provider',
+    providerRegion: 'Region',
     baseUrl: 'Base URL',
     providerDefault: 'Provider default',
     quickModel: 'Quick model',
@@ -57,6 +62,12 @@ const messages = {
     anthropicEffort: 'Anthropic effort',
     checkpointResume: 'Checkpoint resume',
     saveDefaults: 'Save defaults',
+    connectionSettings: 'Provider settings',
+    allApiKeys: 'API keys',
+    fetchModels: 'Fetch models',
+    fetchingModels: 'Fetching',
+    modelFetchUnavailable: 'Model discovery is not available for this provider.',
+    fetchedModels: 'models loaded',
     agentTimeline: 'Agent timeline',
     timelineEmpty: 'Run an analysis to populate the agent timeline.',
     llmCalls: 'LLM calls',
@@ -92,6 +103,8 @@ const messages = {
     eyebrow: 'TradingAgents Web 控制台',
     title: '多智能体金融市场研究工作台',
     runAnalysis: '开始分析',
+    workspace: '工作台',
+    settings: '设置',
     connections: '设置 / API 密钥',
     notConfigured: '未配置',
     replaceValue: '替换当前值',
@@ -102,6 +115,7 @@ const messages = {
     ticker: '股票代码',
     analysisDate: '分析日期',
     provider: '模型供应商',
+    providerRegion: '区域',
     baseUrl: '接口地址',
     providerDefault: '使用供应商默认值',
     quickModel: '快速模型',
@@ -116,6 +130,12 @@ const messages = {
     anthropicEffort: 'Anthropic Effort',
     checkpointResume: '启用断点续跑',
     saveDefaults: '保存默认配置',
+    connectionSettings: '供应商设置',
+    allApiKeys: 'API 密钥',
+    fetchModels: '拉取模型',
+    fetchingModels: '拉取中',
+    modelFetchUnavailable: '该供应商暂不支持自动拉取模型。',
+    fetchedModels: '个模型已加载',
     agentTimeline: '智能体时间线',
     timelineEmpty: '运行一次分析后，这里会显示智能体进度。',
     llmCalls: 'LLM 调用',
@@ -252,10 +272,12 @@ function today() {
 
 function App() {
   const [locale, setLocale] = useState<Locale>(detectLocale);
+  const [activeView, setActiveView] = useState<ViewMode>('workspace');
   const [metadata, setMetadata] = useState<Metadata>(emptyMetadata);
   const [config, setConfig] = useState<WebConfig | null>(null);
   const [secretStatus, setSecretStatus] = useState<SecretStatus>({});
   const [secretDraft, setSecretDraft] = useState<Record<string, string>>({});
+  const [discoveredModels, setDiscoveredModels] = useState<Record<string, Array<{ label: string; value: string }>>>({});
   const [activeRun, setActiveRun] = useState<RunInfo | null>(null);
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [reports, setReports] = useState<ReportsPayload | null>(null);
@@ -265,6 +287,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setSaving] = useState(false);
   const [isRunning, setRunning] = useState(false);
+  const [isFetchingModels, setFetchingModels] = useState(false);
 
   const t = messages[locale];
 
@@ -289,11 +312,26 @@ function App() {
     [metadata.providers, config?.llmProvider],
   );
 
-  const providerModels = config ? metadata.models[config.llmProvider] : undefined;
+  const providerModels = config ? mergedProviderModels(config.llmProvider) : undefined;
   const isCustomOpenAi = config?.llmProvider === 'custom_openai';
+  const customNeedsManualModel = isCustomOpenAi && !discoveredModels[config?.llmProvider ?? '']?.length;
 
   function updateConfig<K extends keyof WebConfig>(key: K, value: WebConfig[K]) {
     setConfig((current) => (current ? { ...current, [key]: value } : current));
+  }
+
+  function changeProvider(nextProvider: string) {
+    if (!config) return;
+    const nextProviderMeta = metadata.providers.find((item) => item.value === nextProvider);
+    const fetched = discoveredModels[nextProvider];
+    const nextModels = fetched?.length ? { quick: fetched, deep: fetched } : metadata.models[nextProvider];
+    setConfig({
+      ...config,
+      llmProvider: nextProvider,
+      backendUrl: nextProviderMeta?.defaultBaseUrl ?? null,
+      quickThinkLlm: nextModels?.quick?.[0]?.value ?? config.quickThinkLlm,
+      deepThinkLlm: nextModels?.deep?.[0]?.value ?? config.deepThinkLlm,
+    });
   }
 
   function toggleAnalyst(value: string) {
@@ -351,11 +389,56 @@ function App() {
       const saved = await api.saveSecrets(secretDraft);
       setSecretStatus(saved);
       setSecretDraft({});
+      return saved;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      return null;
     } finally {
       setSaving(false);
     }
+  }
+
+  async function fetchModelsForCurrentProvider() {
+    if (!config || !provider || provider.modelFetch === 'none') return;
+    setFetchingModels(true);
+    setError(null);
+    try {
+      if (Object.values(secretDraft).some((value) => value.trim())) {
+        await api.saveSecrets(secretDraft);
+        setSecretDraft({});
+        setSecretStatus(await api.secretStatus());
+      }
+      const response = await api.fetchModels(config.llmProvider, config.backendUrl ?? provider.defaultBaseUrl ?? null);
+      const fetched = response.models;
+      setDiscoveredModels((current) => ({ ...current, [config.llmProvider]: fetched }));
+      if (fetched.length > 0) {
+        setConfig((current) => {
+          if (!current) return current;
+          return {
+            ...current,
+            quickThinkLlm: fetched.some((model) => model.value === current.quickThinkLlm) ? current.quickThinkLlm : fetched[0].value,
+            deepThinkLlm: fetched.some((model) => model.value === current.deepThinkLlm) ? current.deepThinkLlm : fetched[0].value,
+          };
+        });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setFetchingModels(false);
+    }
+  }
+
+  function mergedProviderModels(providerValue: string) {
+    const fetched = discoveredModels[providerValue];
+    if (fetched?.length) {
+      return { quick: fetched, deep: fetched };
+    }
+    return metadata.models[providerValue];
+  }
+
+  function modelOptionsFor(mode: 'quick' | 'deep', value: string) {
+    const options = providerModels?.[mode] ?? [];
+    return options.some((item) => item.value === value) ? options : [{ label: value, value }, ...options];
   }
 
   async function startRun() {
@@ -448,6 +531,15 @@ function App() {
           <h1>{t.title}</h1>
         </div>
         <div className="status-cluster">
+          <div className="view-switch" aria-label="Console view">
+            <button className={activeView === 'workspace' ? 'active' : ''} onClick={() => setActiveView('workspace')}>
+              {t.workspace}
+            </button>
+            <button className={activeView === 'settings' ? 'active' : ''} onClick={() => setActiveView('settings')}>
+              <Settings2 size={14} />
+              {t.settings}
+            </button>
+          </div>
           <div className="locale-switch" aria-label="Interface language">
             <button className={locale === 'en' ? 'active' : ''} onClick={() => changeLocale('en')}>
               EN
@@ -474,48 +566,169 @@ function App() {
         </div>
       )}
 
-      <section className="workspace-grid">
-        <aside className="left-rail">
-          <Panel title={t.connections} icon={<KeyRound size={17} />}>
-            <div className="secret-list">
-              {metadata.secretFields.map((field) => (
-                <label key={field} className="secret-row">
+      {activeView === 'settings' ? (
+        <section className="settings-grid">
+          <section className="settings-main">
+            <Panel title={t.connectionSettings} icon={<Settings2 size={17} />}>
+              <div className="form-grid settings-form">
+                <label className="field">
+                  <span>{t.provider}</span>
+                  <select value={config.llmProvider} onChange={(event) => changeProvider(event.target.value)}>
+                    {metadata.providers.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>{t.providerRegion}</span>
+                  <input value={provider?.region ?? '-'} readOnly />
+                </label>
+                <label className="field wide">
+                  <span>{t.baseUrl}</span>
+                  <input
+                    value={config.backendUrl ?? ''}
+                    onChange={(event) => updateConfig('backendUrl', event.target.value || null)}
+                    placeholder={provider?.defaultBaseUrl ?? t.providerDefault}
+                  />
+                </label>
+              </div>
+
+              {provider?.apiKeyField && (
+                <label className="secret-row provider-secret">
                   <span>
-                    {field}
-                    <small>{secretStatus[field]?.configured ? secretStatus[field]?.masked : t.notConfigured}</small>
+                    {provider.apiKeyField}
+                    <small>{secretStatus[provider.apiKeyField]?.configured ? secretStatus[provider.apiKeyField]?.masked : t.notConfigured}</small>
                   </span>
                   <input
                     type="password"
                     autoComplete="off"
-                    placeholder={secretStatus[field]?.configured ? t.replaceValue : t.pasteKey}
-                    value={secretDraft[field] ?? ''}
-                    onChange={(event) => setSecretDraft((current) => ({ ...current, [field]: event.target.value }))}
+                    placeholder={secretStatus[provider.apiKeyField]?.configured ? t.replaceValue : t.pasteKey}
+                    value={secretDraft[provider.apiKeyField] ?? ''}
+                    onChange={(event) => setSecretDraft((current) => ({ ...current, [provider.apiKeyField!]: event.target.value }))}
                   />
                 </label>
+              )}
+
+              <div className="tool-row settings-model-row">
+                <Selector
+                  icon={<Brain size={16} />}
+                  label={t.quickModel}
+                  value={config.quickThinkLlm}
+                  options={modelOptionsFor('quick', config.quickThinkLlm)}
+                  onChange={(value) => updateConfig('quickThinkLlm', value)}
+                />
+                <Selector
+                  icon={<Bot size={16} />}
+                  label={t.deepModel}
+                  value={config.deepThinkLlm}
+                  options={modelOptionsFor('deep', config.deepThinkLlm)}
+                  onChange={(value) => updateConfig('deepThinkLlm', value)}
+                />
+                <button className="secondary model-fetch-button" onClick={fetchModelsForCurrentProvider} disabled={isFetchingModels || provider?.modelFetch === 'none'}>
+                  {isFetchingModels ? <Loader2 className="spin" size={16} /> : <RefreshCw size={16} />}
+                  {isFetchingModels ? t.fetchingModels : t.fetchModels}
+                </button>
+              </div>
+              {provider?.modelFetch === 'none' && <p className="hint">{t.modelFetchUnavailable}</p>}
+              {discoveredModels[config.llmProvider]?.length > 0 && (
+                <p className="hint">{discoveredModels[config.llmProvider].length} {t.fetchedModels}</p>
+              )}
+
+              <div className="actions-row">
+                <button className="secondary" onClick={saveSecrets} disabled={isSaving}>
+                  <Save size={16} />
+                  {t.saveSecrets}
+                </button>
+                <button className="secondary" onClick={saveConfig} disabled={isSaving}>
+                  <Save size={16} />
+                  {t.saveDefaults}
+                </button>
+              </div>
+            </Panel>
+
+            <Panel title={t.customInterfaces} icon={<Server size={17} />}>
+              <p className="hint">{t.customOpenAiHint}</p>
+              <p className="hint">{t.customDataHint}</p>
+              <div className="custom-interface-list">
+                {metadata.dataVendorCategories.map((category) => {
+                  const selectedCustom = config.dataVendors[category.key] === 'custom';
+                  const settings = config.customDataInterfaces[category.key] ?? { baseUrl: null, endpoints: {} };
+                  const methods = metadata.customDataMethods.filter((method) => method.category === category.key);
+                  return (
+                    <section key={category.key} className={selectedCustom ? 'custom-interface active' : 'custom-interface'}>
+                      <label className="field">
+                        <span>{dataVendorLabels[locale][category.key] ?? category.label}</span>
+                        <input
+                          value={settings.baseUrl ?? ''}
+                          onChange={(event) => updateCustomDataBaseUrl(category.key, event.target.value)}
+                          placeholder="https://data.example.com"
+                        />
+                      </label>
+                      <div className="endpoint-grid">
+                        {methods.map((method) => (
+                          <label key={method.method} className="field">
+                            <span>{customMethodLabels[locale][method.method] ?? method.label}</span>
+                            <input
+                              value={settings.endpoints[method.method] ?? method.defaultPath}
+                              onChange={(event) => updateCustomDataEndpoint(category.key, method.method, event.target.value)}
+                              placeholder={t.endpointPath}
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    </section>
+                  );
+                })}
+              </div>
+              <p className="hint">{t.baseUrlRequired}</p>
+            </Panel>
+          </section>
+
+          <aside className="settings-side">
+            <Panel title={t.allApiKeys} icon={<KeyRound size={17} />}>
+              <div className="secret-list">
+                {metadata.secretFields.map((field) => (
+                  <label key={field} className="secret-row">
+                    <span>
+                      {field}
+                      <small>{secretStatus[field]?.configured ? secretStatus[field]?.masked : t.notConfigured}</small>
+                    </span>
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      placeholder={secretStatus[field]?.configured ? t.replaceValue : t.pasteKey}
+                      value={secretDraft[field] ?? ''}
+                      onChange={(event) => setSecretDraft((current) => ({ ...current, [field]: event.target.value }))}
+                    />
+                  </label>
+                ))}
+              </div>
+              <button className="secondary full" onClick={saveSecrets} disabled={isSaving}>
+                <Save size={16} />
+                {t.saveSecrets}
+              </button>
+            </Panel>
+
+            <Panel title={t.dataVendors} icon={<Database size={17} />}>
+              {metadata.dataVendorCategories.map((category) => (
+                <label key={category.key} className="field">
+                  <span>{dataVendorLabels[locale][category.key] ?? category.label}</span>
+                  <select value={config.dataVendors[category.key] ?? ''} onChange={(event) => updateVendor(category.key, event.target.value)}>
+                    {category.options.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               ))}
-            </div>
-            <button className="secondary full" onClick={saveSecrets} disabled={isSaving}>
-              <Save size={16} />
-              {t.saveSecrets}
-            </button>
-          </Panel>
-
-          <Panel title={t.dataVendors} icon={<Database size={17} />}>
-            {metadata.dataVendorCategories.map((category) => (
-              <label key={category.key} className="field">
-                <span>{dataVendorLabels[locale][category.key] ?? category.label}</span>
-                <select value={config.dataVendors[category.key] ?? ''} onChange={(event) => updateVendor(category.key, event.target.value)}>
-                  {category.options.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ))}
-          </Panel>
-        </aside>
-
+            </Panel>
+          </aside>
+        </section>
+      ) : (
+        <section className="workspace-grid workspace-view">
         <section className="main-column">
           <Panel title={t.analysisSetup} icon={<Settings2 size={17} />}>
             <div className="form-grid">
@@ -536,18 +749,7 @@ function App() {
                 <span>{t.provider}</span>
                 <select
                   value={config.llmProvider}
-                  onChange={(event) => {
-                    const nextProvider = event.target.value;
-                    const nextProviderMeta = metadata.providers.find((item) => item.value === nextProvider);
-                    const nextModels = metadata.models[nextProvider];
-                    setConfig({
-                      ...config,
-                      llmProvider: nextProvider,
-                      backendUrl: nextProviderMeta?.defaultBaseUrl ?? null,
-                      quickThinkLlm: nextModels?.quick?.[0]?.value ?? config.quickThinkLlm,
-                      deepThinkLlm: nextModels?.deep?.[0]?.value ?? config.deepThinkLlm,
-                    });
-                  }}
+                  onChange={(event) => changeProvider(event.target.value)}
                 >
                   {metadata.providers.map((item) => (
                     <option key={item.value} value={item.value}>
@@ -556,18 +758,10 @@ function App() {
                   ))}
                 </select>
               </label>
-              <label className="field">
-                <span>{t.baseUrl}</span>
-                <input
-                  value={config.backendUrl ?? ''}
-                  onChange={(event) => updateConfig('backendUrl', event.target.value || null)}
-                  placeholder={provider?.defaultBaseUrl ?? t.providerDefault}
-                />
-              </label>
             </div>
 
             <div className="tool-row">
-              {isCustomOpenAi ? (
+              {customNeedsManualModel ? (
                 <>
                   <label className="field">
                     <span>{t.quickModel}</span>
@@ -592,14 +786,14 @@ function App() {
                     icon={<Brain size={16} />}
                     label={t.quickModel}
                     value={config.quickThinkLlm}
-                    options={providerModels?.quick ?? []}
+                    options={modelOptionsFor('quick', config.quickThinkLlm)}
                     onChange={(value) => updateConfig('quickThinkLlm', value)}
                   />
                   <Selector
                     icon={<Bot size={16} />}
                     label={t.deepModel}
                     value={config.deepThinkLlm}
-                    options={providerModels?.deep ?? []}
+                    options={modelOptionsFor('deep', config.deepThinkLlm)}
                     onChange={(value) => updateConfig('deepThinkLlm', value)}
                   />
                 </>
@@ -716,42 +910,6 @@ function App() {
             </div>
           </Panel>
 
-          <Panel title={t.customInterfaces} icon={<Server size={17} />}>
-            <p className="hint">{t.customOpenAiHint}</p>
-            <p className="hint">{t.customDataHint}</p>
-            <div className="custom-interface-list">
-              {metadata.dataVendorCategories.map((category) => {
-                const selectedCustom = config.dataVendors[category.key] === 'custom';
-                const settings = config.customDataInterfaces[category.key] ?? { baseUrl: null, endpoints: {} };
-                const methods = metadata.customDataMethods.filter((method) => method.category === category.key);
-                return (
-                  <section key={category.key} className={selectedCustom ? 'custom-interface active' : 'custom-interface'}>
-                    <label className="field">
-                      <span>{dataVendorLabels[locale][category.key] ?? category.label}</span>
-                      <input
-                        value={settings.baseUrl ?? ''}
-                        onChange={(event) => updateCustomDataBaseUrl(category.key, event.target.value)}
-                        placeholder="https://data.example.com"
-                      />
-                    </label>
-                    <div className="endpoint-grid">
-                      {methods.map((method) => (
-                        <label key={method.method} className="field">
-                          <span>{customMethodLabels[locale][method.method] ?? method.label}</span>
-                          <input
-                            value={settings.endpoints[method.method] ?? method.defaultPath}
-                            onChange={(event) => updateCustomDataEndpoint(category.key, method.method, event.target.value)}
-                            placeholder={t.endpointPath}
-                          />
-                        </label>
-                      ))}
-                    </div>
-                  </section>
-                );
-              })}
-            </div>
-            <p className="hint">{t.baseUrlRequired}</p>
-          </Panel>
         </section>
 
         <aside className="right-rail">
@@ -813,7 +971,8 @@ function App() {
             </article>
           </Panel>
         </aside>
-      </section>
+        </section>
+      )}
     </main>
   );
 }

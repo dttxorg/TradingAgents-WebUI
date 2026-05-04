@@ -3,6 +3,9 @@ export type Option<T = string> = {
   value: T;
   description?: string;
   defaultBaseUrl?: string | null;
+  apiKeyField?: string | null;
+  modelFetch?: string;
+  region?: 'global' | 'china' | 'local' | 'custom' | string;
   options?: string[];
   key?: string;
 };
@@ -99,4 +102,11 @@ export type HistoricalReport = {
   reports: Record<string, unknown>;
   finalReport?: string | null;
   decision?: string | null;
+};
+
+export type ModelFetchResponse = {
+  provider: string;
+  baseUrl?: string | null;
+  source: string;
+  models: Array<{ label: string; value: string }>;
 };

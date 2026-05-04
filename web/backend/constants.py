@@ -9,6 +9,19 @@ from tradingagents.llm_clients.model_catalog import MODEL_OPTIONS
 
 CUSTOM_OPENAI_PROVIDER = "custom_openai"
 CUSTOM_DATA_VENDOR = "custom"
+OPENAI_COMPATIBLE_ADAPTER_PROVIDERS = {
+    "moonshot",
+    "minimax",
+    "baichuan",
+    "hunyuan",
+    "volcengine",
+    "siliconflow",
+    "groq",
+    "mistral",
+    "together",
+    "fireworks",
+    "perplexity",
+}
 
 OUTPUT_LANGUAGES = [
     {"label": "English (default)", "value": "English"},
@@ -43,21 +56,182 @@ RESEARCH_DEPTHS = [
 ]
 
 PROVIDERS = [
-    {"label": "OpenAI", "value": "openai", "defaultBaseUrl": "https://api.openai.com/v1"},
-    {"label": "Google", "value": "google", "defaultBaseUrl": None},
-    {"label": "Anthropic", "value": "anthropic", "defaultBaseUrl": "https://api.anthropic.com/"},
-    {"label": "xAI", "value": "xai", "defaultBaseUrl": "https://api.x.ai/v1"},
-    {"label": "DeepSeek", "value": "deepseek", "defaultBaseUrl": "https://api.deepseek.com"},
+    {
+        "label": "OpenAI",
+        "value": "openai",
+        "defaultBaseUrl": "https://api.openai.com/v1",
+        "apiKeyField": "OPENAI_API_KEY",
+        "modelFetch": "openai_compatible",
+        "region": "global",
+    },
+    {
+        "label": "Google Gemini",
+        "value": "google",
+        "defaultBaseUrl": "https://generativelanguage.googleapis.com",
+        "apiKeyField": "GOOGLE_API_KEY",
+        "modelFetch": "google",
+        "region": "global",
+    },
+    {
+        "label": "Anthropic",
+        "value": "anthropic",
+        "defaultBaseUrl": "https://api.anthropic.com",
+        "apiKeyField": "ANTHROPIC_API_KEY",
+        "modelFetch": "anthropic",
+        "region": "global",
+    },
+    {
+        "label": "xAI",
+        "value": "xai",
+        "defaultBaseUrl": "https://api.x.ai/v1",
+        "apiKeyField": "XAI_API_KEY",
+        "modelFetch": "openai_compatible",
+        "region": "global",
+    },
+    {
+        "label": "DeepSeek",
+        "value": "deepseek",
+        "defaultBaseUrl": "https://api.deepseek.com",
+        "apiKeyField": "DEEPSEEK_API_KEY",
+        "modelFetch": "openai_compatible",
+        "region": "china",
+    },
     {
         "label": "Qwen",
         "value": "qwen",
         "defaultBaseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "apiKeyField": "DASHSCOPE_API_KEY",
+        "modelFetch": "openai_compatible",
+        "region": "china",
     },
-    {"label": "GLM", "value": "glm", "defaultBaseUrl": "https://open.bigmodel.cn/api/paas/v4/"},
-    {"label": "OpenRouter", "value": "openrouter", "defaultBaseUrl": "https://openrouter.ai/api/v1"},
-    {"label": "Azure OpenAI", "value": "azure", "defaultBaseUrl": None},
-    {"label": "Ollama", "value": "ollama", "defaultBaseUrl": "http://localhost:11434/v1"},
-    {"label": "Custom OpenAI-compatible", "value": CUSTOM_OPENAI_PROVIDER, "defaultBaseUrl": None},
+    {
+        "label": "Moonshot Kimi",
+        "value": "moonshot",
+        "defaultBaseUrl": "https://api.moonshot.cn/v1",
+        "apiKeyField": "MOONSHOT_API_KEY",
+        "modelFetch": "openai_compatible",
+        "region": "china",
+    },
+    {
+        "label": "MiniMax",
+        "value": "minimax",
+        "defaultBaseUrl": "https://api.minimax.chat/v1",
+        "apiKeyField": "MINIMAX_API_KEY",
+        "modelFetch": "openai_compatible",
+        "region": "china",
+    },
+    {
+        "label": "Baichuan",
+        "value": "baichuan",
+        "defaultBaseUrl": "https://api.baichuan-ai.com/v1",
+        "apiKeyField": "BAICHUAN_API_KEY",
+        "modelFetch": "openai_compatible",
+        "region": "china",
+    },
+    {
+        "label": "Tencent Hunyuan",
+        "value": "hunyuan",
+        "defaultBaseUrl": "https://api.hunyuan.cloud.tencent.com/v1",
+        "apiKeyField": "HUNYUAN_API_KEY",
+        "modelFetch": "openai_compatible",
+        "region": "china",
+    },
+    {
+        "label": "Volcengine Ark",
+        "value": "volcengine",
+        "defaultBaseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+        "apiKeyField": "ARK_API_KEY",
+        "modelFetch": "openai_compatible",
+        "region": "china",
+    },
+    {
+        "label": "SiliconFlow",
+        "value": "siliconflow",
+        "defaultBaseUrl": "https://api.siliconflow.cn/v1",
+        "apiKeyField": "SILICONFLOW_API_KEY",
+        "modelFetch": "openai_compatible",
+        "region": "china",
+    },
+    {
+        "label": "GLM",
+        "value": "glm",
+        "defaultBaseUrl": "https://open.bigmodel.cn/api/paas/v4/",
+        "apiKeyField": "ZHIPU_API_KEY",
+        "modelFetch": "openai_compatible",
+        "region": "china",
+    },
+    {
+        "label": "Groq",
+        "value": "groq",
+        "defaultBaseUrl": "https://api.groq.com/openai/v1",
+        "apiKeyField": "GROQ_API_KEY",
+        "modelFetch": "openai_compatible",
+        "region": "global",
+    },
+    {
+        "label": "Mistral AI",
+        "value": "mistral",
+        "defaultBaseUrl": "https://api.mistral.ai/v1",
+        "apiKeyField": "MISTRAL_API_KEY",
+        "modelFetch": "openai_compatible",
+        "region": "global",
+    },
+    {
+        "label": "Together AI",
+        "value": "together",
+        "defaultBaseUrl": "https://api.together.xyz/v1",
+        "apiKeyField": "TOGETHER_API_KEY",
+        "modelFetch": "openai_compatible",
+        "region": "global",
+    },
+    {
+        "label": "Fireworks AI",
+        "value": "fireworks",
+        "defaultBaseUrl": "https://api.fireworks.ai/inference/v1",
+        "apiKeyField": "FIREWORKS_API_KEY",
+        "modelFetch": "openai_compatible",
+        "region": "global",
+    },
+    {
+        "label": "Perplexity",
+        "value": "perplexity",
+        "defaultBaseUrl": "https://api.perplexity.ai",
+        "apiKeyField": "PERPLEXITY_API_KEY",
+        "modelFetch": "openai_compatible",
+        "region": "global",
+    },
+    {
+        "label": "OpenRouter",
+        "value": "openrouter",
+        "defaultBaseUrl": "https://openrouter.ai/api/v1",
+        "apiKeyField": "OPENROUTER_API_KEY",
+        "modelFetch": "openai_compatible",
+        "region": "global",
+    },
+    {
+        "label": "Azure OpenAI",
+        "value": "azure",
+        "defaultBaseUrl": None,
+        "apiKeyField": "AZURE_OPENAI_API_KEY",
+        "modelFetch": "none",
+        "region": "global",
+    },
+    {
+        "label": "Ollama",
+        "value": "ollama",
+        "defaultBaseUrl": "http://localhost:11434/v1",
+        "apiKeyField": None,
+        "modelFetch": "openai_compatible",
+        "region": "local",
+    },
+    {
+        "label": "Custom OpenAI-compatible",
+        "value": CUSTOM_OPENAI_PROVIDER,
+        "defaultBaseUrl": None,
+        "apiKeyField": "CUSTOM_OPENAI_API_KEY",
+        "modelFetch": "openai_compatible",
+        "region": "custom",
+    },
 ]
 
 DATA_VENDOR_CATEGORIES = [
@@ -111,7 +285,52 @@ SECRET_FIELDS = [
     "ALPHA_VANTAGE_API_KEY",
     "CUSTOM_OPENAI_API_KEY",
     "CUSTOM_DATA_API_KEY",
+    "MOONSHOT_API_KEY",
+    "MINIMAX_API_KEY",
+    "BAICHUAN_API_KEY",
+    "HUNYUAN_API_KEY",
+    "ARK_API_KEY",
+    "SILICONFLOW_API_KEY",
+    "GROQ_API_KEY",
+    "MISTRAL_API_KEY",
+    "TOGETHER_API_KEY",
+    "FIREWORKS_API_KEY",
+    "PERPLEXITY_API_KEY",
 ]
+
+EXTRA_MODEL_OPTIONS = {
+    "moonshot": ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"],
+    "minimax": ["MiniMax-Text-01", "abab6.5s-chat", "abab6.5g-chat"],
+    "baichuan": ["Baichuan4", "Baichuan3-Turbo", "Baichuan3-Turbo-128k"],
+    "hunyuan": ["hunyuan-turbo", "hunyuan-large", "hunyuan-standard"],
+    "volcengine": ["doubao-seed-1-6", "doubao-1-5-pro-32k", "doubao-1-5-lite-32k"],
+    "siliconflow": ["Qwen/Qwen3-235B-A22B", "deepseek-ai/DeepSeek-V3", "deepseek-ai/DeepSeek-R1"],
+    "groq": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b"],
+    "mistral": ["mistral-large-latest", "mistral-small-latest", "open-mixtral-8x22b"],
+    "together": ["meta-llama/Llama-3.3-70B-Instruct-Turbo", "deepseek-ai/DeepSeek-V3", "Qwen/Qwen2.5-72B-Instruct-Turbo"],
+    "fireworks": ["accounts/fireworks/models/llama-v3p3-70b-instruct", "accounts/fireworks/models/deepseek-v3"],
+    "perplexity": ["sonar", "sonar-pro", "sonar-reasoning-pro"],
+}
+
+
+def provider_by_value(value: str) -> dict[str, Any] | None:
+    provider = value.strip().lower()
+    return next((item for item in PROVIDERS if item["value"] == provider), None)
+
+
+def provider_default_base_url(value: str) -> str | None:
+    provider = provider_by_value(value)
+    return provider.get("defaultBaseUrl") if provider else None
+
+
+def provider_secret_field(value: str) -> str | None:
+    provider = provider_by_value(value)
+    return provider.get("apiKeyField") if provider else None
+
+
+def provider_model_fetch(value: str) -> str:
+    provider = provider_by_value(value)
+    return provider.get("modelFetch", "none") if provider else "none"
 
 
 def analyst_options() -> list[dict[str, str]]:
@@ -134,6 +353,9 @@ def model_options() -> dict[str, dict[str, list[dict[str, str]]]]:
         "quick": [{"label": "Custom model ID", "value": "custom-model"}],
         "deep": [{"label": "Custom model ID", "value": "custom-model"}],
     }
+    for provider, models in EXTRA_MODEL_OPTIONS.items():
+        model_items = [{"label": model, "value": model} for model in models]
+        options[provider] = {"quick": model_items, "deep": model_items}
     return options
 
 

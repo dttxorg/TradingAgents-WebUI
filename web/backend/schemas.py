@@ -214,6 +214,39 @@ class SecretFieldStatus(APIModel):
     masked: str | None = None
 
 
+class ModelFetchRequest(APIModel):
+    provider: str
+    base_url: str | None = None
+
+    @field_validator("provider")
+    @classmethod
+    def validate_provider(cls, value: str) -> str:
+        provider = value.strip().lower()
+        if provider not in ALLOWED_PROVIDERS:
+            raise ValueError(f"Unsupported LLM provider: {value}")
+        return provider
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip().rstrip("/")
+        return cleaned or None
+
+
+class DiscoveredModel(APIModel):
+    label: str
+    value: str
+
+
+class ModelFetchResponse(APIModel):
+    provider: str
+    base_url: str | None = None
+    source: str
+    models: list[DiscoveredModel] = Field(default_factory=list)
+
+
 class RunRequest(APIModel):
     ticker: str
     analysis_date: date
