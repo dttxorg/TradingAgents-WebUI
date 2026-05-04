@@ -758,6 +758,11 @@ textarea {
   min-height: 18px;
 }
 
+.compact-toggle {
+  min-height: 38px;
+  align-items: center;
+}
+
 .secret-list {
   display: grid;
   gap: 10px;
@@ -892,6 +897,15 @@ textarea {
 .custom-interface.active {
   border-color: #4c8e77;
   opacity: 1;
+}
+
+.backtest-settings {
+  display: grid;
+  gap: 12px;
+}
+
+.backtest-settings-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .endpoint-grid {
@@ -1220,6 +1234,129 @@ textarea {
   gap: 12px;
 }
 
+.backtest-record-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #25373c;
+  background: #10181b;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.backtest-record-head > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.backtest-record-head span,
+.backtest-record-head small {
+  color: #8fa0a2;
+  font-size: 11px;
+  font-weight: 730;
+}
+
+.backtest-record-head strong {
+  color: #eef5f4;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.backtest-record-head button {
+  flex: 0 0 auto;
+}
+
+.backtest-summary,
+.backtest-result {
+  border: 1px solid #25373c;
+  background: #0c1215;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.compact-title {
+  margin: 0 0 9px;
+}
+
+.backtest-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.backtest-summary-grid .metric {
+  padding: 8px;
+}
+
+.backtest-summary-grid .metric strong {
+  font-size: 15px;
+}
+
+.backtest-result {
+  display: grid;
+  gap: 8px;
+}
+
+.result-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #8fa0a2;
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.result-row strong {
+  color: #eef5f4;
+  font-size: 12px;
+}
+
+.hit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.hit-card {
+  border: 1px solid #25373c;
+  background: #10181b;
+  border-radius: 8px;
+  padding: 9px;
+}
+
+.hit-card.hit {
+  border-color: #2b6b52;
+}
+
+.hit-card.miss {
+  border-color: #3e4632;
+}
+
+.hit-card span,
+.hit-card small {
+  display: block;
+  color: #8fa0a2;
+  font-size: 11px;
+  font-weight: 720;
+}
+
+.hit-card strong {
+  display: block;
+  margin: 3px 0;
+  color: #eef5f4;
+  font-size: 14px;
+}
+
+.note-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #d8e1e2;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .observation-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1258,6 +1395,60 @@ textarea {
   color: #d8e1e2;
   font-size: 12px;
   line-height: 1.6;
+}
+
+.checkpoint-list {
+  display: grid;
+  gap: 7px;
+}
+
+.checkpoint-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 10px;
+  border-left: 2px solid #345056;
+  background: #0c1215;
+  border-radius: 0 8px 8px 0;
+  padding: 7px 9px;
+}
+
+.checkpoint-row.completed {
+  border-left-color: #83e4b9;
+}
+
+.checkpoint-row.running {
+  border-left-color: #79d5ff;
+}
+
+.checkpoint-row.failed {
+  border-left-color: #ff9b99;
+}
+
+.checkpoint-row span,
+.checkpoint-row strong,
+.checkpoint-row small,
+.checkpoint-row p {
+  font-size: 12px;
+}
+
+.checkpoint-row span {
+  color: #d8e1e2;
+  font-weight: 740;
+}
+
+.checkpoint-row strong {
+  color: #83e4b9;
+}
+
+.checkpoint-row small {
+  grid-column: 1 / -1;
+  color: #8fa0a2;
+}
+
+.checkpoint-row p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #d8e1e2;
 }
 
 .empty {
@@ -1316,6 +1507,9 @@ textarea {
   .batch-list,
   .route-fields,
   .observation-grid,
+  .backtest-settings-grid,
+  .backtest-summary-grid,
+  .hit-grid,
   .workspace-overview,
   .flow-card,
   .timeline-estimate {

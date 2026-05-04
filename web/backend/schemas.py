@@ -571,6 +571,178 @@ class RunBilling(APIModel):
     usage: TokenUsage = Field(default_factory=TokenUsage)
 
 
+BacktestRecordStatus = Literal["pending", "running", "waiting_data", "completed", "failed"]
+BacktestCheckpointStatus = Literal["pending", "running", "completed", "failed", "skipped"]
+BacktestOutcome = Literal["target_hit", "stop_hit", "entry_not_hit", "ambiguous", "manual_review", "waiting_data", "not_actionable"]
+BacktestPriceDataSource = Literal["yfinance", "custom"]
+
+
+class BacktestScheduleConfig(APIModel):
+    enabled: bool = False
+    interval_minutes: int = 1440
+    review_window_days: int = 30
+    max_reports_per_cycle: int = 20
+    checkpoint_enabled: bool = True
+    price_data_source: BacktestPriceDataSource = "yfinance"
+    custom_base_url: str | None = None
+    custom_endpoint: str = "/backtest/prices"
+
+    @field_validator("interval_minutes")
+    @classmethod
+    def validate_interval(cls, value: int) -> int:
+        if value < 5 or value > 43200:
+            raise ValueError("Backtest interval must be between 5 minutes and 30 days.")
+        return value
+
+    @field_validator("review_window_days")
+    @classmethod
+    def validate_window(cls, value: int) -> int:
+        if value < 1 or value > 3650:
+            raise ValueError("Review window must be between 1 and 3650 days.")
+        return value
+
+    @field_validator("max_reports_per_cycle")
+    @classmethod
+    def validate_cycle_limit(cls, value: int) -> int:
+        if value < 1 or value > 500:
+            raise ValueError("Backtest cycle limit must be between 1 and 500 reports.")
+        return value
+
+    @field_validator("custom_base_url")
+    @classmethod
+    def validate_custom_base_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip().rstrip("/")
+        return cleaned or None
+
+    @field_validator("custom_endpoint")
+    @classmethod
+    def validate_custom_endpoint(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Backtest custom endpoint is required.")
+        return cleaned if cleaned.startswith("/") else f"/{cleaned}"
+
+    @model_validator(mode="after")
+    def validate_custom_source(self) -> "BacktestScheduleConfig":
+        if self.price_data_source == "custom" and not self.custom_base_url:
+            raise ValueError("Custom backtest price data source requires a Base URL.")
+        return self
+
+
+class BacktestCheckpoint(APIModel):
+    key: str
+    status: BacktestCheckpointStatus
+    updated_at: datetime
+    message: str | None = None
+
+
+class BacktestPriceBar(APIModel):
+    date: date
+    open: float | None = None
+    high: float | None = None
+    low: float | None = None
+    close: float | None = None
+
+
+class BacktestParsedPlan(APIModel):
+    decision: str | None = None
+    entry_plan: str | None = None
+    stop_plan: str | None = None
+    target_plan: str | None = None
+    position_plan: str | None = None
+    risk_plan: str | None = None
+    observation_order: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    entry_levels: list[float] = Field(default_factory=list)
+    stop_levels: list[float] = Field(default_factory=list)
+    target_levels: list[float] = Field(default_factory=list)
+    stop_offset: float | None = None
+    action: Literal["buy", "sell", "hold", "unknown"] = "unknown"
+    needs_manual_review: bool = False
+
+
+class BacktestResult(APIModel):
+    outcome: BacktestOutcome = "waiting_data"
+    entry_hit: bool | None = None
+    entry_hit_date: date | None = None
+    entry_hit_price: float | None = None
+    target_hit: bool | None = None
+    target_hit_date: date | None = None
+    target_hit_price: float | None = None
+    stop_hit: bool | None = None
+    stop_hit_date: date | None = None
+    stop_hit_price: float | None = None
+    bars_checked: int = 0
+    price_source: str | None = None
+    notes: list[str] = Field(default_factory=list)
+
+
+class BacktestRecord(APIModel):
+    id: str
+    run_id: str
+    user_id: str | None = None
+    ticker: str
+    analysis_date: date
+    status: BacktestRecordStatus = "pending"
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+    last_checkpoint: str | None = None
+    resume_count: int = 0
+    error: str | None = None
+    plan: BacktestParsedPlan = Field(default_factory=BacktestParsedPlan)
+    result: BacktestResult = Field(default_factory=BacktestResult)
+    checkpoints: list[BacktestCheckpoint] = Field(default_factory=list)
+    price_bars: list[BacktestPriceBar] = Field(default_factory=list)
+
+
+class BacktestRunRequest(APIModel):
+    run_id: str | None = None
+    ticker: str | None = None
+    limit: int = 20
+
+    @field_validator("ticker")
+    @classmethod
+    def validate_ticker(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        ticker = normalize_ticker_symbol(value)
+        return ticker or None
+
+    @field_validator("limit")
+    @classmethod
+    def validate_limit(cls, value: int) -> int:
+        if value < 1 or value > 500:
+            raise ValueError("Backtest run limit must be between 1 and 500.")
+        return value
+
+
+class BacktestRunResponse(APIModel):
+    records: list[BacktestRecord] = Field(default_factory=list)
+    skipped_completed: int = 0
+
+
+class BacktestRecordList(APIModel):
+    records: list[BacktestRecord] = Field(default_factory=list)
+
+
+class BacktestTickerSummary(APIModel):
+    ticker: str
+    total_reports: int = 0
+    records_total: int = 0
+    completed_records: int = 0
+    pending_records: int = 0
+    actionable_records: int = 0
+    entry_hits: int = 0
+    target_hits: int = 0
+    stop_hits: int = 0
+    ambiguous: int = 0
+    manual_review: int = 0
+    waiting_data: int = 0
+
+
 class ModelFetchRequest(APIModel):
     provider: str
     base_url: str | None = None

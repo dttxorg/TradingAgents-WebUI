@@ -17,6 +17,10 @@ from .auth import hash_password, new_salt, new_session_token, session_token_hash
 from .schemas import (
     AdminUserCreate,
     AdminUserUpdate,
+    BacktestRecord,
+    BacktestRecordList,
+    BacktestScheduleConfig,
+    BacktestTickerSummary,
     OrderListResponse,
     OrderRecord,
     PricingConfig,
@@ -61,6 +65,9 @@ class WebStorage:
         self.sessions_path = self.root / "sessions.json"
         self.pricing_path = self.root / "pricing.json"
         self.orders_path = self.root / "orders.json"
+        self.backtest_config_path = self.root / "backtest_config.json"
+        self.backtest_records_path = self.root / "backtests.json"
+        self.backtest_scheduler_path = self.root / "backtest_scheduler.json"
         self.history_dir = self.root / "history"
         self._lock = threading.RLock()
         self.root.mkdir(parents=True, exist_ok=True)
@@ -389,6 +396,88 @@ class WebStorage:
             order = self._load_orders().get(order_id)
             return self.order_billing_summary(OrderRecord.model_validate(order)) if order else None
 
+    def load_backtest_config(self) -> BacktestScheduleConfig:
+        with self._lock:
+            return BacktestScheduleConfig.model_validate(self._load_json(self.backtest_config_path, {}))
+
+    def save_backtest_config(self, config: BacktestScheduleConfig) -> BacktestScheduleConfig:
+        with self._lock:
+            self._atomic_write_json(self.backtest_config_path, config.model_dump(mode="json", by_alias=True))
+            return config
+
+    def load_backtest_scheduler_state(self) -> dict[str, Any]:
+        with self._lock:
+            state = self._load_json(self.backtest_scheduler_path, {})
+            return state if isinstance(state, dict) else {}
+
+    def save_backtest_scheduler_state(self, state: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            current = self.load_backtest_scheduler_state()
+            current.update(state)
+            self._atomic_write_json(self.backtest_scheduler_path, current)
+            return current
+
+    def load_backtest_record(self, run_id: str) -> BacktestRecord | None:
+        with self._lock:
+            record = self._load_backtest_records().get(run_id)
+            return BacktestRecord.model_validate(record) if record else None
+
+    def save_backtest_record(self, record: BacktestRecord) -> BacktestRecord:
+        with self._lock:
+            records = self._load_backtest_records()
+            records[record.run_id] = record.model_dump(mode="json", by_alias=True)
+            self._save_backtest_records(records)
+            return record
+
+    def list_backtest_records(self, ticker: str | None = None, user_id: str | None = None, limit: int = 100) -> BacktestRecordList:
+        limit = max(1, min(limit, 500))
+        with self._lock:
+            records = [BacktestRecord.model_validate(record) for record in self._load_backtest_records().values()]
+        if ticker is not None:
+            records = [record for record in records if record.ticker == ticker]
+        if user_id is not None:
+            records = [record for record in records if record.user_id == user_id]
+        records.sort(key=lambda record: record.updated_at, reverse=True)
+        return BacktestRecordList(records=records[:limit])
+
+    def backtest_ticker_summary(self, ticker: str, user_id: str | None = None) -> BacktestTickerSummary:
+        ticker_history = [self._history_item(archive) for archive in self._load_history_archives()]
+        if user_id is not None:
+            ticker_history = [item for item in ticker_history if item.user_id == user_id]
+        ticker_history = [item for item in ticker_history if item.ticker == ticker]
+        with self._lock:
+            records = [BacktestRecord.model_validate(record) for record in self._load_backtest_records().values()]
+        records = [record for record in records if record.ticker == ticker]
+        if user_id is not None:
+            records = [record for record in records if record.user_id == user_id]
+        completed = [record for record in records if record.status == "completed"]
+        return BacktestTickerSummary(
+            ticker=ticker,
+            totalReports=len(ticker_history),
+            recordsTotal=len(records),
+            completedRecords=len(completed),
+            pendingRecords=len([record for record in records if record.status != "completed"]),
+            actionableRecords=len([record for record in completed if record.result.outcome not in {"manual_review", "not_actionable", "waiting_data"}]),
+            entryHits=len([record for record in completed if record.result.entry_hit]),
+            targetHits=len([record for record in completed if record.result.target_hit]),
+            stopHits=len([record for record in completed if record.result.stop_hit]),
+            ambiguous=len([record for record in completed if record.result.outcome == "ambiguous"]),
+            manualReview=len([record for record in completed if record.result.outcome == "manual_review"]),
+            waitingData=len([record for record in records if record.status == "waiting_data" or record.result.outcome == "waiting_data"]),
+        )
+
+    def _load_backtest_records(self) -> dict[str, dict[str, Any]]:
+        payload = self._load_json(self.backtest_records_path, {"records": []})
+        records = payload.get("records", []) if isinstance(payload, dict) else []
+        return {
+            record["runId"]: record
+            for record in records
+            if isinstance(record, dict) and record.get("runId")
+        }
+
+    def _save_backtest_records(self, records: dict[str, dict[str, Any]]) -> None:
+        self._atomic_write_json(self.backtest_records_path, {"records": list(records.values())})
+
     def _load_users(self) -> dict[str, dict[str, Any]]:
         payload = self._load_json(self.users_path, {"users": []})
         users = payload.get("users", []) if isinstance(payload, dict) else []
@@ -516,7 +605,7 @@ class WebStorage:
         return archive
 
     def list_report_history(self, limit: int = 50, user_id: str | None = None) -> ReportHistoryList:
-        limit = max(1, min(limit, 200))
+        limit = max(1, min(limit, 1000))
         items = [self._history_item(archive) for archive in self._load_history_archives()]
         if user_id is not None:
             items = [item for item in items if item.user_id == user_id]

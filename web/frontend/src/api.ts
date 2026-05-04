@@ -1,4 +1,9 @@
 import type {
+  BacktestRecord,
+  BacktestRecordList,
+  BacktestRunResponse,
+  BacktestScheduleConfig,
+  BacktestTickerSummary,
   BatchRunResponse,
   BootstrapStatus,
   HistoricalReport,
@@ -102,4 +107,15 @@ export const api = {
   adminSavePricing: (pricing: PricingConfig) =>
     request<PricingConfig>('/api/admin/billing/pricing', { method: 'PUT', body: JSON.stringify(pricing) }),
   adminOrders: (limit = 200) => request<OrderListResponse>(`/api/admin/orders?limit=${limit}`),
+  backtestConfig: () => request<BacktestScheduleConfig>('/api/backtests/config'),
+  saveBacktestConfig: (config: BacktestScheduleConfig) =>
+    request<BacktestScheduleConfig>('/api/backtests/config', { method: 'PUT', body: JSON.stringify(config) }),
+  runBacktests: (payload: { runId?: string | null; ticker?: string | null; limit?: number }) =>
+    request<BacktestRunResponse>('/api/backtests/run', { method: 'POST', body: JSON.stringify(payload) }),
+  runBacktestRecord: (runId: string) =>
+    request<BacktestRecord>(`/api/backtests/records/${encodeURIComponent(runId)}/run`, { method: 'POST' }),
+  backtestRecord: (runId: string) => request<BacktestRecord>(`/api/backtests/records/${encodeURIComponent(runId)}`),
+  backtestRecords: (ticker?: string | null, limit = 100) =>
+    request<BacktestRecordList>(`/api/backtests/records?limit=${limit}${ticker ? `&ticker=${encodeURIComponent(ticker)}` : ''}`),
+  backtestSummary: (ticker: string) => request<BacktestTickerSummary>(`/api/backtests/summary/${encodeURIComponent(ticker)}`),
 };

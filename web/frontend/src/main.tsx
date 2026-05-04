@@ -33,6 +33,9 @@ import {
 } from 'lucide-react';
 import { api } from './api';
 import type {
+  BacktestRecord,
+  BacktestScheduleConfig,
+  BacktestTickerSummary,
   HistoricalReport,
   Metadata,
   OrderRecord,
@@ -136,7 +139,34 @@ const messages = {
     reports: 'Reports',
     final: 'Final',
     backtestWatch: 'Backtest watch',
+    backtestSchedule: 'Backtest schedule',
     backtestNoReport: 'No report content to observe yet.',
+    runBacktest: 'Run review',
+    resumeBacktest: 'Resume review',
+    backtestRecord: 'Review record',
+    backtestStatus: 'Review status',
+    backtestOutcome: 'Outcome',
+    backtestApi: 'Review price API',
+    priceDataSource: 'Price source',
+    customBacktestApi: 'Custom price API',
+    customBacktestEndpoint: 'Custom endpoint',
+    saveBacktestSettings: 'Save review settings',
+    alreadyReviewed: 'Already reviewed',
+    noBacktestRecord: 'No persistent review record yet.',
+    schedulerEnabled: 'Enable scheduler',
+    intervalMinutes: 'Interval minutes',
+    reviewWindowDays: 'Review window days',
+    maxReportsPerCycle: 'Reports per cycle',
+    checkpoints: 'Checkpoints',
+    tickerHitSummary: 'Ticker hit summary',
+    resumeCount: 'Resume count',
+    barsChecked: 'Bars checked',
+    priceSource: 'Price source',
+    entryHit: 'Entry hit',
+    targetHit: 'Target hit',
+    stopHit: 'Stop hit',
+    hitDate: 'Hit date',
+    hitPrice: 'Hit price',
     extractedDecision: 'Decision',
     entryPlan: 'Entry plan',
     stopPlan: 'Stop plan',
@@ -189,6 +219,13 @@ const messages = {
     queued: 'queued',
     running: 'running',
     pending: 'pending',
+    waiting_data: 'waiting for data',
+    target_hit: 'target hit',
+    stop_hit: 'stop hit',
+    entry_not_hit: 'entry not hit',
+    ambiguous: 'ambiguous',
+    manual_review: 'manual review',
+    not_actionable: 'not actionable',
     succeeded: 'succeeded',
     failed: 'failed',
     cancelled: 'cancelled',
@@ -277,7 +314,34 @@ const messages = {
     reports: '报告',
     final: '最终报告',
     backtestWatch: '回测观察',
+    backtestSchedule: '复盘周期',
     backtestNoReport: '暂无可复盘的报告内容。',
+    runBacktest: '运行复盘',
+    resumeBacktest: '断点续跑',
+    backtestRecord: '复盘记录',
+    backtestStatus: '复盘状态',
+    backtestOutcome: '命中结果',
+    backtestApi: '复盘行情 API',
+    priceDataSource: '行情来源',
+    customBacktestApi: '自定义行情 API',
+    customBacktestEndpoint: '自定义接口路径',
+    saveBacktestSettings: '保存复盘设置',
+    alreadyReviewed: '已出具复盘记录',
+    noBacktestRecord: '尚未生成持久化复盘记录。',
+    schedulerEnabled: '启用定时复盘',
+    intervalMinutes: '周期分钟数',
+    reviewWindowDays: '复盘窗口天数',
+    maxReportsPerCycle: '每轮报告数',
+    checkpoints: '检查点',
+    tickerHitSummary: '同股命中汇总',
+    resumeCount: '续跑次数',
+    barsChecked: '检查 K 线数',
+    priceSource: '行情来源',
+    entryHit: '入场命中',
+    targetHit: '目标命中',
+    stopHit: '止损命中',
+    hitDate: '命中日期',
+    hitPrice: '命中价格',
     extractedDecision: '交易建议',
     entryPlan: '入场计划',
     stopPlan: '止损计划',
@@ -330,6 +394,13 @@ const messages = {
     queued: '排队中',
     running: '运行中',
     pending: '等待中',
+    waiting_data: '等待数据',
+    target_hit: '目标命中',
+    stop_hit: '止损命中',
+    entry_not_hit: '未触发入场',
+    ambiguous: '顺序不明',
+    manual_review: '人工复核',
+    not_actionable: '不可执行',
     succeeded: '已完成',
     failed: '失败',
     cancelled: '已停止',
@@ -453,6 +524,9 @@ function App() {
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [adminUsers, setAdminUsers] = useState<User[]>([]);
   const [adminPricing, setAdminPricing] = useState<PricingConfig | null>(null);
+  const [backtestConfig, setBacktestConfig] = useState<BacktestScheduleConfig | null>(null);
+  const [backtestRecord, setBacktestRecord] = useState<BacktestRecord | null>(null);
+  const [backtestSummary, setBacktestSummary] = useState<BacktestTickerSummary | null>(null);
   const [modelPriceDraft, setModelPriceDraft] = useState('');
   const [adminOrders, setAdminOrders] = useState<OrderRecord[]>([]);
   const [newUserDraft, setNewUserDraft] = useState({ username: '', password: '', displayName: '', role: 'user' as 'admin' | 'user', initialBalance: '0' });
@@ -472,6 +546,7 @@ function App() {
   const [isSaving, setSaving] = useState(false);
   const [isRunning, setRunning] = useState(false);
   const [isFetchingModels, setFetchingModels] = useState(false);
+  const [isBacktestRunning, setBacktestRunning] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
 
   const t = messages[locale];
@@ -479,13 +554,14 @@ function App() {
 
   async function loadWorkspaceData(user: User) {
     setError(null);
-    const [metadataValue, configValue, pricingValue, historyValue, activeRunsValue, orderValue] = await Promise.all([
+    const [metadataValue, configValue, pricingValue, historyValue, activeRunsValue, orderValue, backtestConfigValue] = await Promise.all([
       api.metadata(),
       api.config(),
       api.publicPricing(),
       api.reportHistory(),
       api.runs(true),
       api.orders(),
+      api.backtestConfig(),
     ]);
     setMetadata({ ...emptyMetadata, ...metadataValue });
     setConfig(configValue);
@@ -493,6 +569,7 @@ function App() {
     setPublicPricing(pricingValue);
     setHistory(historyValue.items);
     setOrders(orderValue.orders);
+    setBacktestConfig(backtestConfigValue);
     if (user.role === 'admin') {
       const [secretValue, pricingConfig, usersValue, adminOrderValue] = await Promise.all([
         api.secretStatus(),
@@ -549,6 +626,38 @@ function App() {
     return () => window.clearInterval(timer);
   }, [isRunning]);
 
+  useEffect(() => {
+    if (!currentUser) return undefined;
+    const candidate = viewedArchive?.run ?? activeRun;
+    if (!candidate) {
+      setBacktestRecord(null);
+      setBacktestSummary(null);
+      return undefined;
+    }
+    let cancelled = false;
+    api.backtestSummary(candidate.ticker)
+      .then((summary) => {
+        if (!cancelled) setBacktestSummary(summary);
+      })
+      .catch(() => {
+        if (!cancelled) setBacktestSummary(null);
+      });
+    if (viewedArchive || candidate.status === 'succeeded') {
+      api.backtestRecord(candidate.id)
+        .then((record) => {
+          if (!cancelled) setBacktestRecord(record);
+        })
+        .catch(() => {
+          if (!cancelled) setBacktestRecord(null);
+        });
+    } else {
+      setBacktestRecord(null);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id, activeRun?.id, activeRun?.status, activeRun?.ticker, viewedArchive?.run.id, viewedArchive?.run.ticker]);
+
   function changeLocale(value: Locale) {
     setLocale(value);
     window.localStorage.setItem('tradingagents-webui-locale', value);
@@ -571,6 +680,9 @@ function App() {
     setReports(null);
     setOrders([]);
     setAdminUsers([]);
+    setBacktestConfig(null);
+    setBacktestRecord(null);
+    setBacktestSummary(null);
     setActiveView('workspace');
   }
 
@@ -748,6 +860,10 @@ function App() {
     });
   }
 
+  function updateBacktestConfig<K extends keyof BacktestScheduleConfig>(key: K, value: BacktestScheduleConfig[K]) {
+    setBacktestConfig((current) => (current ? { ...current, [key]: value } : current));
+  }
+
   async function saveConfig() {
     if (!config) return;
     setSaving(true);
@@ -755,6 +871,27 @@ function App() {
     try {
       const saved = await api.saveConfig(config);
       setConfig(saved);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveBacktestSettings() {
+    if (!backtestConfig) return;
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const saved = await api.saveBacktestConfig(backtestConfig);
+      setBacktestConfig(saved);
+      if (secretDraft.BACKTEST_DATA_API_KEY?.trim()) {
+        const status = await api.saveSecrets({ BACKTEST_DATA_API_KEY: secretDraft.BACKTEST_DATA_API_KEY });
+        setSecretStatus(status);
+        setSecretDraft((current) => ({ ...current, BACKTEST_DATA_API_KEY: '' }));
+      }
+      setNotice(t.saveBacktestSettings);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -881,6 +1018,22 @@ function App() {
       refreshAccountAndBilling().catch(() => undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function runDisplayedBacktest() {
+    const target = viewedArchive?.run ?? activeRun;
+    if (!target) return;
+    setBacktestRunning(true);
+    setError(null);
+    try {
+      const record = await api.runBacktestRecord(target.id);
+      setBacktestRecord(record);
+      setBacktestSummary(await api.backtestSummary(record.ticker));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBacktestRunning(false);
     }
   }
 
@@ -1301,6 +1454,113 @@ function App() {
                 })}
               </div>
               <p className="hint">{t.baseUrlRequired}</p>
+            </Panel>
+
+            <Panel title={t.backtestSchedule} icon={<History size={17} />}>
+              {backtestConfig ? (
+                <div className="backtest-settings">
+                  <div className="form-grid backtest-settings-grid">
+                    <label className="toggle-row compact-toggle">
+                      <input
+                        type="checkbox"
+                        checked={backtestConfig.enabled}
+                        onChange={(event) => updateBacktestConfig('enabled', event.target.checked)}
+                      />
+                      <span>{t.schedulerEnabled}</span>
+                    </label>
+                    <label className="toggle-row compact-toggle">
+                      <input
+                        type="checkbox"
+                        checked={backtestConfig.checkpointEnabled}
+                        onChange={(event) => updateBacktestConfig('checkpointEnabled', event.target.checked)}
+                      />
+                      <span>{t.checkpointResume}</span>
+                    </label>
+                    <label className="field">
+                      <span>{t.intervalMinutes}</span>
+                      <input
+                        type="number"
+                        min={5}
+                        max={43200}
+                        value={backtestConfig.intervalMinutes}
+                        onChange={(event) => updateBacktestConfig('intervalMinutes', clampNumber(event.target.value, 5, 43200))}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>{t.reviewWindowDays}</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={3650}
+                        value={backtestConfig.reviewWindowDays}
+                        onChange={(event) => updateBacktestConfig('reviewWindowDays', clampNumber(event.target.value, 1, 3650))}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>{t.maxReportsPerCycle}</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={500}
+                        value={backtestConfig.maxReportsPerCycle}
+                        onChange={(event) => updateBacktestConfig('maxReportsPerCycle', clampNumber(event.target.value, 1, 500))}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>{t.priceDataSource}</span>
+                      <select value={backtestConfig.priceDataSource} onChange={(event) => updateBacktestConfig('priceDataSource', event.target.value as BacktestScheduleConfig['priceDataSource'])}>
+                        <option value="yfinance">yfinance</option>
+                        <option value="custom">custom</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className={backtestConfig.priceDataSource === 'custom' ? 'custom-interface active' : 'custom-interface'}>
+                    <div className="endpoint-grid">
+                      <label className="field">
+                        <span>{t.customBacktestApi}</span>
+                        <input
+                          value={backtestConfig.customBaseUrl ?? ''}
+                          onChange={(event) => updateBacktestConfig('customBaseUrl', event.target.value || null)}
+                          placeholder="https://prices.example.com/api"
+                        />
+                      </label>
+                      <label className="field">
+                        <span>{t.customBacktestEndpoint}</span>
+                        <input
+                          value={backtestConfig.customEndpoint}
+                          onChange={(event) => updateBacktestConfig('customEndpoint', event.target.value)}
+                          placeholder="/backtest/prices"
+                        />
+                      </label>
+                    </div>
+                    <label className="secret-row provider-secret">
+                      <span>
+                        BACKTEST_DATA_API_KEY
+                        <small>{secretStatus.BACKTEST_DATA_API_KEY?.configured ? secretStatus.BACKTEST_DATA_API_KEY?.masked : t.notConfigured}</small>
+                      </span>
+                      <input
+                        type="password"
+                        autoComplete="off"
+                        placeholder={secretStatus.BACKTEST_DATA_API_KEY?.configured ? t.replaceValue : t.pasteKey}
+                        value={secretDraft.BACKTEST_DATA_API_KEY ?? ''}
+                        onChange={(event) => setSecretDraft((current) => ({ ...current, BACKTEST_DATA_API_KEY: event.target.value }))}
+                      />
+                    </label>
+                  </div>
+                  <p className="hint">
+                    {locale === 'zh'
+                      ? 'custom 复盘行情接口应返回 bars/data 数组，每项包含 date、open、high、low、close。已完成的复盘记录不会再次执行；等待数据或失败的记录会从检查点续跑。'
+                      : 'A custom review price API should return a bars/data array with date, open, high, low, close. Completed review records are not rerun; waiting-data or failed records resume from checkpoints.'}
+                  </p>
+                  <button className="secondary full" onClick={saveBacktestSettings} disabled={isSaving}>
+                    <Save size={16} />
+                    {t.saveBacktestSettings}
+                  </button>
+                </div>
+              ) : (
+                <span className="empty">-</span>
+              )}
             </Panel>
           </section>
 
@@ -1814,7 +2074,15 @@ function App() {
             </div>
             <article className="report-view">
               {reportTab === 'backtestWatch' ? (
-                <BacktestObservationView observation={backtestObservation} labels={t} />
+                <BacktestObservationView
+                  observation={backtestObservation}
+                  record={backtestRecord}
+                  summary={backtestSummary}
+                  labels={t}
+                  locale={outputLocale}
+                  onRun={runDisplayedBacktest}
+                  isRunning={isBacktestRunning}
+                />
               ) : (
                 <pre>{reportTab === 'finalReport' ? displayedReports?.finalReport ?? t.noReport : stringifyReport(displayedReports?.reports?.[reportTab], t.noReport)}</pre>
               )}
@@ -2038,6 +2306,11 @@ function formatMoney(value: string | number | null | undefined, currency = 'USD'
   return `${amount.toFixed(6)} ${currency}`;
 }
 
+function formatNumber(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return '-';
+  return Number.isInteger(value) ? String(value) : value.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+}
+
 function confidenceLabel(value: 'low' | 'medium' | 'high', locale: Locale) {
   if (locale === 'zh') {
     return value === 'high' ? '高' : value === 'medium' ? '中' : '低';
@@ -2057,24 +2330,106 @@ type BacktestObservation = {
   assumptions: string[];
 };
 
-function BacktestObservationView({ observation, labels }: { observation: BacktestObservation; labels: Record<string, string> }) {
-  if (!observation.hasReport) {
+function BacktestObservationView({
+  observation,
+  record,
+  summary,
+  labels,
+  locale,
+  onRun,
+  isRunning,
+}: {
+  observation: BacktestObservation;
+  record: BacktestRecord | null;
+  summary: BacktestTickerSummary | null;
+  labels: Record<string, string>;
+  locale: Locale;
+  onRun: () => void;
+  isRunning: boolean;
+}) {
+  if (!observation.hasReport && !record) {
     return <span className="empty">{labels.backtestNoReport}</span>;
   }
+  const completed = record?.status === 'completed';
+  const actionLabel = completed ? labels.alreadyReviewed : record ? labels.resumeBacktest : labels.runBacktest;
+  const plan = record?.plan;
+  const result = record?.result;
   return (
     <div className="observation-view">
+      <div className="backtest-record-head">
+        <div>
+          <span>{labels.backtestRecord}</span>
+          <strong>{record ? `${labels.backtestStatus}: ${statusLabel(record.status, locale)}` : labels.noBacktestRecord}</strong>
+          {record && (
+            <small>
+              {labels.resumeCount}: {record.resumeCount} · {labels.checkpoints}: {record.lastCheckpoint ?? '-'}
+            </small>
+          )}
+        </div>
+        <button className={completed ? 'secondary' : 'primary'} onClick={onRun} disabled={isRunning || completed || !observation.hasReport}>
+          {isRunning ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+          {actionLabel}
+        </button>
+      </div>
+
+      {summary && (
+        <section className="backtest-summary">
+          <div className="section-title compact-title">
+            <BarChart3 size={16} />
+            {labels.tickerHitSummary}: {summary.ticker}
+          </div>
+          <div className="backtest-summary-grid">
+            <Metric label={labels.reports} value={summary.totalReports} />
+            <Metric label={labels.backtestRecord} value={`${summary.completedRecords}/${summary.recordsTotal}`} />
+            <Metric label={labels.entryHit} value={summary.entryHits} />
+            <Metric label={labels.targetHit} value={summary.targetHits} />
+            <Metric label={labels.stopHit} value={summary.stopHits} />
+            <Metric label={labels.backtestOutcome} value={`${summary.manualReview}/${summary.ambiguous}/${summary.waitingData}`} />
+          </div>
+        </section>
+      )}
+
+      {record && (
+        <section className="backtest-result">
+          <div className="result-row">
+            <span>{labels.backtestOutcome}</span>
+            <strong>{statusLabel(result?.outcome ?? record.status, locale)}</strong>
+          </div>
+          <div className="result-row">
+            <span>{labels.priceSource}</span>
+            <strong>{result?.priceSource ?? '-'}</strong>
+          </div>
+          <div className="result-row">
+            <span>{labels.barsChecked}</span>
+            <strong>{result?.barsChecked ?? 0}</strong>
+          </div>
+          <div className="hit-grid">
+            <HitCard label={labels.entryHit} hit={result?.entryHit} date={result?.entryHitDate} price={result?.entryHitPrice} labels={labels} locale={locale} />
+            <HitCard label={labels.targetHit} hit={result?.targetHit} date={result?.targetHitDate} price={result?.targetHitPrice} labels={labels} locale={locale} />
+            <HitCard label={labels.stopHit} hit={result?.stopHit} date={result?.stopHitDate} price={result?.stopHitPrice} labels={labels} locale={locale} />
+          </div>
+          {result?.notes?.length ? (
+            <ul className="note-list">
+              {result.notes.map((note) => (
+                <li key={note}>{note}</li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+      )}
+
       <div className="observation-grid">
-        <ObservationCard label={labels.extractedDecision} value={observation.decision} />
-        <ObservationCard label={labels.entryPlan} value={observation.entry} />
-        <ObservationCard label={labels.stopPlan} value={observation.stop} />
-        <ObservationCard label={labels.targetPlan} value={observation.targets} />
-        <ObservationCard label={labels.positionPlan} value={observation.position} />
-        <ObservationCard label={labels.riskPlan} value={observation.risks} />
+        <ObservationCard label={labels.extractedDecision} value={plan?.decision ?? observation.decision} />
+        <ObservationCard label={labels.entryPlan} value={plan?.entryPlan ?? observation.entry} />
+        <ObservationCard label={labels.stopPlan} value={plan?.stopPlan ?? observation.stop} />
+        <ObservationCard label={labels.targetPlan} value={plan?.targetPlan ?? observation.targets} />
+        <ObservationCard label={labels.positionPlan} value={plan?.positionPlan ?? observation.position} />
+        <ObservationCard label={labels.riskPlan} value={plan?.riskPlan ?? observation.risks} />
       </div>
       <section className="observation-section">
         <h3>{labels.observationOrder}</h3>
         <ol>
-          {observation.order.map((item) => (
+          {(plan?.observationOrder?.length ? plan.observationOrder : observation.order).map((item) => (
             <li key={item}>{item}</li>
           ))}
         </ol>
@@ -2082,12 +2437,53 @@ function BacktestObservationView({ observation, labels }: { observation: Backtes
       <section className="observation-section">
         <h3>{labels.assumptionChecks}</h3>
         <ul>
-          {observation.assumptions.map((item) => (
+          {(plan?.assumptions?.length ? plan.assumptions : observation.assumptions).map((item) => (
             <li key={item}>{item}</li>
           ))}
         </ul>
       </section>
+      {record?.checkpoints?.length ? (
+        <section className="observation-section">
+          <h3>{labels.checkpoints}</h3>
+          <div className="checkpoint-list">
+            {record.checkpoints.map((checkpoint) => (
+              <div key={checkpoint.key} className={`checkpoint-row ${checkpoint.status}`}>
+                <span>{cleanLabel(checkpoint.key)}</span>
+                <strong>{statusLabel(checkpoint.status, locale)}</strong>
+                <small>{new Date(checkpoint.updatedAt).toLocaleString()}</small>
+                {checkpoint.message && <p>{checkpoint.message}</p>}
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </div>
+  );
+}
+
+function HitCard({
+  label,
+  hit,
+  date,
+  price,
+  labels,
+  locale,
+}: {
+  label: string;
+  hit?: boolean | null;
+  date?: string | null;
+  price?: number | null;
+  labels: Record<string, string>;
+  locale: Locale;
+}) {
+  return (
+    <section className={`hit-card ${hit ? 'hit' : 'miss'}`}>
+      <span>{label}</span>
+      <strong>{hit == null ? '-' : hit ? (locale === 'zh' ? '是' : 'Yes') : (locale === 'zh' ? '否' : 'No')}</strong>
+      <small>
+        {labels.hitDate}: {date ?? '-'} · {labels.hitPrice}: {formatNumber(price)}
+      </small>
+    </section>
   );
 }
 

@@ -14,12 +14,16 @@ from fastapi.staticfiles import StaticFiles
 from requests import RequestException
 
 from .auth import SESSION_COOKIE
+from .backtesting import BacktestEngine, BacktestScheduler
 from .constants import metadata_payload
 from .model_discovery import fetch_provider_models
 from .runner import RunManager
 from .schemas import (
     AdminUserCreate,
     AdminUserUpdate,
+    BacktestRecord,
+    BacktestRunRequest,
+    BacktestScheduleConfig,
     BatchRunRequest,
     BatchRunResponse,
     BootstrapRequest,
@@ -45,8 +49,10 @@ load_dotenv(".env.enterprise", override=False)
 storage = WebStorage()
 storage.load_secrets_into_env()
 run_manager = RunManager(storage)
+backtest_scheduler = BacktestScheduler(storage)
 
 app = FastAPI(title="TradingAgents Web API", version="0.1.0")
+backtest_scheduler.start()
 
 
 def _cookie_secure() -> bool:
@@ -115,6 +121,17 @@ def user_batch_config(request: BatchRunRequest, user: UserPublic) -> BatchRunReq
             }
         ),
     )
+
+
+def backtest_record_payload(record: BacktestRecord) -> dict:
+    return record.model_dump(mode="json", by_alias=True, exclude={"price_bars"})
+
+
+def backtest_records_payload(records: list[BacktestRecord], skipped_completed: int = 0) -> dict:
+    return {
+        "records": [backtest_record_payload(record) for record in records],
+        "skippedCompleted": skipped_completed,
+    }
 
 
 @app.get("/api/health")
@@ -335,6 +352,83 @@ def get_report_history(run_id: str, user: UserPublic = Depends(current_user)) ->
     if user.role != "admin" and archive.run.user_id != user.id:
         raise HTTPException(status_code=403, detail="Historical report does not belong to this user.")
     return archive.model_dump(mode="json", by_alias=True)
+
+
+@app.get("/api/backtests/config")
+def get_backtest_config(_: UserPublic = Depends(current_user)) -> dict:
+    return storage.load_backtest_config().model_dump(mode="json", by_alias=True)
+
+
+@app.put("/api/backtests/config")
+def put_backtest_config(config: BacktestScheduleConfig, _: UserPublic = Depends(admin_user)) -> dict:
+    return storage.save_backtest_config(config).model_dump(mode="json", by_alias=True)
+
+
+@app.get("/api/backtests/scheduler")
+def get_backtest_scheduler_state(_: UserPublic = Depends(admin_user)) -> dict:
+    return storage.load_backtest_scheduler_state()
+
+
+@app.post("/api/backtests/run")
+def run_backtests(request: BacktestRunRequest, user: UserPublic = Depends(current_user)) -> dict:
+    engine = BacktestEngine(storage)
+    if request.run_id:
+        archive = storage.load_report_history(request.run_id)
+        if archive is None:
+            raise HTTPException(status_code=404, detail="Historical report not found.")
+        if user.role != "admin" and archive.run.user_id != user.id:
+            raise HTTPException(status_code=403, detail="Historical report does not belong to this user.")
+        existing = storage.load_backtest_record(archive.run.id)
+        record = engine.run_report(archive)
+        return backtest_records_payload(
+            [record],
+            skipped_completed=1 if existing is not None and existing.status == "completed" else 0,
+        )
+    response = engine.run_due(limit=request.limit, ticker=request.ticker, user=user)
+    return backtest_records_payload(response.records, response.skipped_completed)
+
+
+@app.get("/api/backtests/records")
+def list_backtest_records(
+    ticker: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    user: UserPublic = Depends(current_user),
+) -> dict:
+    records = storage.list_backtest_records(
+        ticker=ticker,
+        user_id=None if user.role == "admin" else user.id,
+        limit=limit,
+    ).records
+    return {"records": [backtest_record_payload(record) for record in records]}
+
+
+@app.get("/api/backtests/records/{run_id}")
+def get_backtest_record(run_id: str, user: UserPublic = Depends(current_user)) -> dict:
+    record = storage.load_backtest_record(run_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Backtest record not found.")
+    if user.role != "admin" and record.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Backtest record does not belong to this user.")
+    return backtest_record_payload(record)
+
+
+@app.post("/api/backtests/records/{run_id}/run")
+def run_backtest_record(run_id: str, user: UserPublic = Depends(current_user)) -> dict:
+    archive = storage.load_report_history(run_id)
+    if archive is None:
+        raise HTTPException(status_code=404, detail="Historical report not found.")
+    if user.role != "admin" and archive.run.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Historical report does not belong to this user.")
+    record = BacktestEngine(storage).run_report(archive)
+    return backtest_record_payload(record)
+
+
+@app.get("/api/backtests/summary/{ticker}")
+def get_backtest_ticker_summary(ticker: str, user: UserPublic = Depends(current_user)) -> dict:
+    return storage.backtest_ticker_summary(
+        ticker=ticker.upper(),
+        user_id=None if user.role == "admin" else user.id,
+    ).model_dump(mode="json", by_alias=True)
 
 
 @app.get("/api/runs/{run_id}/events")

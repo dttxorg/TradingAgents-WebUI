@@ -25,6 +25,9 @@ instead of being hard-coded in the React app.
 - Report tabs for agent output, final report, stats, and decision
 - Persistent report history for reviewing prior runs and preparing future
   backtesting workflows
+- Dedicated backtest observation API with one persistent review record per
+  report, checkpoint resume, scheduler settings, custom review price API, and
+  per-ticker hit summaries
 - Account login, admin/user role separation, user balances, isolated secret
   permissions, token statistics, order records, pre-authorization, post-run
   settlement, refunds, manual recharge, and configurable token/per-run pricing
@@ -73,6 +76,15 @@ Completed reports are archived under the WebUI data directory and exposed via
 stores the run metadata, report payload, final report, decision, and non-secret
 configuration snapshot, which gives future backtesting features a stable input
 surface.
+
+Backtest observation records are exposed via `/api/backtests/*`. The backend
+uses the report `runId` as the unique review key, so each archived report can
+produce one review record. Completed records are returned as-is and are not
+rerun; records that failed or waited for market data can resume from saved
+checkpoints. Administrators can configure the review scheduler, review window,
+cycle size, checkpointing, and a dedicated yfinance/custom price data API in the
+Settings view. The custom price API should return daily `bars` or `data` with
+`date`, `open`, `high`, `low`, and `close` fields.
 
 ### Accounts and Billing
 
@@ -144,8 +156,11 @@ rate-limit pressure.
 
 The `Backtest watch` tab parses completed reports into an observation checklist:
 entry condition first, then stop/target/risk checks only after entry is reached.
-It does not change the TradingAgents backend strategy logic; it prepares a
-stable review surface for later automated backtesting.
+It also shows the persistent review record, checkpoints, resume count, entry
+hit, target hit, stop hit, and same-ticker summary counts. It does not change
+the TradingAgents backend strategy logic; it adds a review layer for measuring
+whether historical reports were actionable and whether their targets or stops
+were reached.
 
 SOCKS5/HTTP proxying is intentionally not enabled as a raw WebUI field because
 an arbitrary proxy can see prompts, report content, and API credentials. For
@@ -177,6 +192,8 @@ TradingAgents-WebUI 是一个面向
 - 支持多股票按列表提交，并可配置股票任务并行 worker 数
 - 报告 Tabs 展示智能体输出、最终报告、统计信息和决策结果
 - 持久化历史报告，方便回看历史运行结果，并为后续回测功能准备数据基础
+- 独立回测观察 API：每份报告生成一份持久化复盘记录，支持断点续跑、定时周期、
+  自定义复盘行情 API，并提供同一股票的命中统计
 - 支持账号登录、管理员/普通用户分级、用户余额、API Key 权限隔离、Token
   统计、订单记录、预授权冻结、运行后结算、多余退款、手动充值，以及可配置的
   Token/按次/混合计费
@@ -220,6 +237,13 @@ React 前端会从 `/api/metadata` 读取供应商、模型、语言、分析师
 完成的报告会归档到 WebUI 数据目录，并通过 `GET /api/reports/history` 和
 `GET /api/reports/history/{runId}` 暴露。每份归档包含运行元数据、报告内容、
 最终报告、决策结果和不含密钥的配置快照，后续回测功能可以直接复用这层稳定数据。
+
+复盘观察记录通过 `/api/backtests/*` 暴露。后端以报告 `runId` 作为唯一复盘键，
+因此一份历史报告只会生成一份复盘记录。已经完成的复盘记录会直接返回，不再重复执行；
+等待行情数据或失败的记录可以从已保存检查点继续跑。管理员可以在 Settings 中配置
+复盘定时周期、复盘窗口、每轮处理报告数量、断点续跑，以及独立的 yfinance/custom
+复盘行情 API。自定义行情 API 应返回包含 `date`、`open`、`high`、`low`、`close`
+字段的日线 `bars` 或 `data` 数组。
 
 ### 账号与计费
 
@@ -279,8 +303,9 @@ Settings 页面还提供按智能体的 LLM 路由。四个初始分析师被标
 用于分摊供应商限流。
 
 `回测观察` 标签会把完成报告拆成复盘清单：必须先触达到入场条件，之后才统计止损、
-目标价和风险条件是否命中。它不改 TradingAgents 后端策略逻辑，只为后续自动回测
-准备稳定的观察面。
+目标价和风险条件是否命中。页面会同时展示持久化复盘记录、检查点、续跑次数、入场命中、
+目标命中、止损命中，以及同一股票有多少份报告被命中。它不改 TradingAgents 后端策略
+逻辑，而是在外层增加一套可复盘、可统计的可靠性观察层。
 
 WebUI 没有默认加入任意 SOCKS5/HTTP 代理字段，因为代理端可能看到提示词、报告内容
 和 API Key。需要可信网络路由时，建议把某个路由的 `Base URL` 指向你自己控制的

@@ -5,16 +5,18 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
+import requests
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 import web.backend.app as app_module
 from web.backend.app import app
+from web.backend.backtesting import BacktestEngine
 from web.backend.constants import CUSTOM_DATA_VENDOR, CUSTOM_OPENAI_PROVIDER, metadata_payload
 from web.backend.custom_data import configure_custom_data_interfaces
 from web.backend.model_discovery import fetch_provider_models
 from web.backend.runner import RunManager
-from web.backend.schemas import ModelFetchRequest, PricingConfig, RechargeRequest, RunInfo, RunReports, RunRequest, WebConfig
+from web.backend.schemas import BacktestPriceBar, BacktestScheduleConfig, ModelFetchRequest, PricingConfig, RechargeRequest, RunInfo, RunReports, RunRequest, WebConfig
 from web.backend.storage import WebStorage, calculate_analysis_cost, mask_secret, usage_from_stats
 
 
@@ -42,6 +44,7 @@ def test_metadata_exposes_configurable_catalogs():
     assert any(method["method"] == "get_news" for method in payload["customDataMethods"])
     assert "CUSTOM_OPENAI_API_KEY" in payload["secretFields"]
     assert "CUSTOM_DATA_API_KEY" in payload["secretFields"]
+    assert "BACKTEST_DATA_API_KEY" in payload["secretFields"]
     assert "MOONSHOT_API_KEY" in payload["secretFields"]
 
 
@@ -180,6 +183,169 @@ def test_storage_persists_report_history(tmp_path):
     assert history.items[0].provider == config.llm_provider
     assert history.items[0].decision == "BUY"
     assert storage.load_report_history("../not-a-run") is None
+
+
+def test_backtest_record_is_one_per_report_and_summarizes_hits(monkeypatch, tmp_path):
+    storage = WebStorage(tmp_path)
+    config = WebConfig(ticker="SPY", analysisDate=date(2026, 5, 1), analysts=["market"], outputLanguage="Chinese")
+    run = RunInfo(
+        id="77777777-7777-4777-8777-777777777777",
+        status="succeeded",
+        ticker="SPY",
+        analysisDate=date(2026, 5, 1),
+        submittedAt=datetime(2026, 5, 1, 8, 0, tzinfo=timezone.utc),
+        endedAt=datetime(2026, 5, 1, 8, 5, tzinfo=timezone.utc),
+        decision="BUY",
+    )
+    storage.save_report_history(
+        run,
+        config,
+        RunReports(
+            runId=run.id,
+            reports={},
+            finalReport=(
+                "**最终交易建议：BUY (逢低做多)**\n\n"
+                "- **策略**：等待价格回调至 10 日 EMA (约 711) 或 50 日 SMA (约 679) 附近时入场\n"
+                "- **止损**：设置在入场价下方 2 倍 ATR (约 18 美元) 或关键支撑位下方\n"
+                "- **目标**：第一目标 736 (布林带上轨)，第二目标 745-750\n"
+            ),
+            decision="BUY",
+        ),
+    )
+
+    monkeypatch.setattr(
+        "web.backend.backtesting.fetch_price_bars",
+        lambda ticker, start, end: [
+            BacktestPriceBar(date=date(2026, 5, 2), open=720, high=722, low=710, close=715),
+            BacktestPriceBar(date=date(2026, 5, 3), open=716, high=738, low=714, close=736),
+        ],
+    )
+
+    archive = storage.load_report_history(run.id)
+    record = BacktestEngine(storage).run_report(archive)  # type: ignore[arg-type]
+    second = BacktestEngine(storage).run_report(archive)  # type: ignore[arg-type]
+    summary = storage.backtest_ticker_summary("SPY")
+
+    assert record.status == "completed"
+    assert record.result.outcome == "target_hit"
+    assert record.result.entry_hit is True
+    assert record.result.target_hit is True
+    assert second.id == record.id
+    assert second.resume_count == record.resume_count
+    assert summary.total_reports == 1
+    assert summary.completed_records == 1
+    assert summary.target_hits == 1
+
+
+def test_backtest_waiting_data_can_resume(monkeypatch, tmp_path):
+    storage = WebStorage(tmp_path)
+    config = WebConfig(ticker="SPY", analysisDate=date(2026, 5, 1), analysts=["market"])
+    run = RunInfo(
+        id="88888888-8888-4888-8888-888888888888",
+        status="succeeded",
+        ticker="SPY",
+        analysisDate=date(2026, 5, 1),
+        submittedAt=datetime(2026, 5, 1, 8, 0, tzinfo=timezone.utc),
+    )
+    storage.save_report_history(
+        run,
+        config,
+        RunReports(
+            runId=run.id,
+            reports={},
+            finalReport="Final recommendation: BUY\nEntry: wait for 100\nStop loss: 95\nTargets: 110",
+            decision="BUY",
+        ),
+    )
+    archive = storage.load_report_history(run.id)
+
+    monkeypatch.setattr("web.backend.backtesting.fetch_price_bars", lambda ticker, start, end: [])
+    waiting = BacktestEngine(storage).run_report(archive)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        "web.backend.backtesting.fetch_price_bars",
+        lambda ticker, start, end: [BacktestPriceBar(date=date(2026, 5, 2), open=105, high=111, low=99, close=110)],
+    )
+    resumed = BacktestEngine(storage).run_report(archive)  # type: ignore[arg-type]
+
+    assert waiting.status == "waiting_data"
+    assert resumed.status == "completed"
+    assert resumed.resume_count == 1
+    assert [checkpoint.key for checkpoint in resumed.checkpoints] == [
+        "parse_report",
+        "fetch_market_data",
+        "evaluate_report",
+        "finalize_record",
+    ]
+
+
+def test_backtest_custom_price_api_is_dedicated_and_checkpointed(monkeypatch, tmp_path):
+    storage = WebStorage(tmp_path)
+    storage.save_secrets({"BACKTEST_DATA_API_KEY": "backtest-secret"})
+    config = BacktestScheduleConfig(
+        priceDataSource="custom",
+        customBaseUrl="https://prices.example.com/api",
+        customEndpoint="daily",
+        reviewWindowDays=10,
+    )
+    storage.save_backtest_config(config)
+    run = RunInfo(
+        id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        status="succeeded",
+        ticker="SPY",
+        analysisDate=date(2026, 5, 1),
+        submittedAt=datetime(2026, 5, 1, 8, 0, tzinfo=timezone.utc),
+        decision="BUY",
+    )
+    storage.save_report_history(
+        run,
+        WebConfig(ticker="SPY", analysisDate=date(2026, 5, 1), analysts=["market"]),
+        RunReports(
+            runId=run.id,
+            reports={},
+            finalReport="Final recommendation: BUY\nEntry: wait for 100\nStop loss: 95\nTargets: 110",
+            decision="BUY",
+        ),
+    )
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "bars": [
+                    {"date": "2026-05-02", "open": 105, "high": 111, "low": 99, "close": 110},
+                ]
+            }
+
+    def fake_post(url, headers, json, timeout):
+        calls.append({"url": url, "headers": headers, "json": json, "timeout": timeout})
+        return FakeResponse()
+
+    monkeypatch.setattr(requests, "post", fake_post)
+
+    record = BacktestEngine(storage).run_report(storage.load_report_history(run.id))  # type: ignore[arg-type]
+
+    assert record.status == "completed"
+    assert record.result.outcome == "target_hit"
+    assert record.result.price_source == "custom"
+    assert record.last_checkpoint == "finalize_record"
+    assert calls == [
+        {
+            "url": "https://prices.example.com/api/daily",
+            "headers": {"Content-Type": "application/json", "Authorization": "Bearer backtest-secret"},
+            "json": {
+                "ticker": "SPY",
+                "start": "2026-05-01",
+                "end": "2026-05-04",
+                "interval": "1d",
+                "purpose": "backtest_observation",
+            },
+            "timeout": 30,
+        }
+    ]
 
 
 def test_custom_openai_requires_base_url_and_accepts_model_ids():
@@ -593,6 +759,53 @@ def test_report_history_endpoints(monkeypatch, tmp_path):
     assert list_payload["items"][0]["runId"] == run.id
     assert detail_payload["finalReport"] == "Final"
     assert client.get("/api/reports/history/not-a-uuid").status_code == 404
+
+
+def test_backtest_endpoints_run_once_and_expose_summary(monkeypatch, tmp_path):
+    storage = WebStorage(tmp_path)
+    config = WebConfig(ticker="SPY", analysisDate=date(2026, 5, 1), analysts=["market"])
+    run = RunInfo(
+        id="99999999-9999-4999-8999-999999999999",
+        status="succeeded",
+        ticker="SPY",
+        analysisDate=date(2026, 5, 1),
+        submittedAt=datetime(2026, 5, 1, 8, 0, tzinfo=timezone.utc),
+        decision="BUY",
+    )
+    storage.save_report_history(
+        run,
+        config,
+        RunReports(
+            runId=run.id,
+            reports={},
+            finalReport="Final recommendation: BUY\nEntry: wait for 100\nStop loss: 95\nTargets: 110",
+            decision="BUY",
+        ),
+    )
+    client = TestClient(app)
+    login_test_admin(client, storage, monkeypatch)
+    monkeypatch.setattr(
+        "web.backend.backtesting.fetch_price_bars",
+        lambda ticker, start, end: [BacktestPriceBar(date=date(2026, 5, 2), open=105, high=111, low=99, close=110)],
+    )
+
+    config_payload = client.put(
+        "/api/backtests/config",
+        json=BacktestScheduleConfig(enabled=True, intervalMinutes=60, reviewWindowDays=10).model_dump(mode="json", by_alias=True),
+    ).json()
+    first = client.post(f"/api/backtests/records/{run.id}/run").json()
+    second = client.post("/api/backtests/run", json={"runId": run.id}).json()
+    detail = client.get(f"/api/backtests/records/{run.id}").json()
+    summary = client.get("/api/backtests/summary/SPY").json()
+
+    assert config_payload["enabled"] is True
+    assert first["status"] == "completed"
+    assert first["result"]["outcome"] == "target_hit"
+    assert "priceBars" not in first
+    assert "priceBars" not in detail
+    assert second["skippedCompleted"] == 1
+    assert second["records"][0]["id"] == first["id"]
+    assert summary["targetHits"] == 1
 
 
 def test_run_manager_completes_with_mock_graph(monkeypatch, tmp_path):

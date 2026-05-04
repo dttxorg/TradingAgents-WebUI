@@ -229,6 +229,88 @@ export type HistoricalReport = {
   decision?: string | null;
 };
 
+export type BacktestScheduleConfig = {
+  enabled: boolean;
+  intervalMinutes: number;
+  reviewWindowDays: number;
+  maxReportsPerCycle: number;
+  checkpointEnabled: boolean;
+  priceDataSource: 'yfinance' | 'custom';
+  customBaseUrl?: string | null;
+  customEndpoint: string;
+};
+
+export type BacktestRecord = {
+  id: string;
+  runId: string;
+  userId?: string | null;
+  ticker: string;
+  analysisDate: string;
+  status: 'pending' | 'running' | 'waiting_data' | 'completed' | 'failed';
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+  lastCheckpoint?: string | null;
+  resumeCount: number;
+  error?: string | null;
+  plan: {
+    decision?: string | null;
+    entryPlan?: string | null;
+    stopPlan?: string | null;
+    targetPlan?: string | null;
+    positionPlan?: string | null;
+    riskPlan?: string | null;
+    observationOrder: string[];
+    assumptions: string[];
+    entryLevels: number[];
+    stopLevels: number[];
+    targetLevels: number[];
+    stopOffset?: number | null;
+    action: 'buy' | 'sell' | 'hold' | 'unknown';
+    needsManualReview: boolean;
+  };
+  result: {
+    outcome: 'target_hit' | 'stop_hit' | 'entry_not_hit' | 'ambiguous' | 'manual_review' | 'waiting_data' | 'not_actionable';
+    entryHit?: boolean | null;
+    entryHitDate?: string | null;
+    entryHitPrice?: number | null;
+    targetHit?: boolean | null;
+    targetHitDate?: string | null;
+    targetHitPrice?: number | null;
+    stopHit?: boolean | null;
+    stopHitDate?: string | null;
+    stopHitPrice?: number | null;
+    barsChecked: number;
+    priceSource?: string | null;
+    notes: string[];
+  };
+  checkpoints: Array<{ key: string; status: string; updatedAt: string; message?: string | null }>;
+};
+
+export type BacktestRunResponse = {
+  records: BacktestRecord[];
+  skippedCompleted: number;
+};
+
+export type BacktestRecordList = {
+  records: BacktestRecord[];
+};
+
+export type BacktestTickerSummary = {
+  ticker: string;
+  totalReports: number;
+  recordsTotal: number;
+  completedRecords: number;
+  pendingRecords: number;
+  actionableRecords: number;
+  entryHits: number;
+  targetHits: number;
+  stopHits: number;
+  ambiguous: number;
+  manualReview: number;
+  waitingData: number;
+};
+
 export type ModelFetchResponse = {
   provider: string;
   baseUrl?: string | null;
