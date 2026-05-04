@@ -79,7 +79,17 @@ const messages = {
     analysisSetup: 'Analysis setup',
     ticker: 'Ticker',
     tickerList: 'Ticker list',
-    tickerListHint: 'Run one symbol, or paste a comma/newline separated list. Batch runs keep this order.',
+    tickerListHint: 'Enter bare symbols. The selected market profile appends the configured region suffix automatically.',
+    stockMarket: 'Stock market',
+    marketSettings: 'Market profiles',
+    marketRegion: 'Region suffix',
+    marketWeight: 'Market weight',
+    marketPrompt: 'Market profile prompt',
+    effectiveTicker: 'Runtime symbol',
+    usMarket: 'US stocks',
+    hkMarket: 'Hong Kong stocks',
+    shMarket: 'Shanghai A shares',
+    szMarket: 'Shenzhen A shares',
     analysisDate: 'Analysis date',
     provider: 'Provider',
     providerRegion: 'Region',
@@ -254,7 +264,17 @@ const messages = {
     analysisSetup: '分析配置',
     ticker: '股票代码',
     tickerList: '股票列表',
-    tickerListHint: '输入单只股票，或粘贴用逗号/换行分隔的股票列表；批量分析会按这个顺序排队执行。',
+    tickerListHint: '只输入裸股票代码，不需要填写点号；系统会按所选市场自动追加配置的 region 后缀。',
+    stockMarket: '股票市场',
+    marketSettings: '市场配置',
+    marketRegion: 'Region 后缀',
+    marketWeight: '市场权重',
+    marketPrompt: 'Market profile Prompt',
+    effectiveTicker: '实际调用代码',
+    usMarket: '美股',
+    hkMarket: '港股',
+    shMarket: '上证',
+    szMarket: '深证',
     analysisDate: '分析日期',
     provider: '模型供应商',
     providerRegion: '区域',
@@ -427,6 +447,16 @@ const dataVendorLabels: Record<Locale, Record<string, string>> = {
   },
 };
 
+const stockMarketLabels: Record<Locale, Record<string, string>> = {
+  en: {},
+  zh: {
+    us: '美股',
+    hk: '港股',
+    sh: '上证',
+    sz: '深证',
+  },
+};
+
 const customMethodLabels: Record<Locale, Record<string, string>> = {
   en: {},
   zh: {
@@ -491,6 +521,7 @@ const agentLabels: Record<Locale, Record<string, string>> = {
 const emptyMetadata: Metadata = {
   analysts: [],
   researchDepths: [],
+  stockMarkets: [],
   providers: [],
   models: {},
   languages: [],
@@ -779,9 +810,15 @@ function App() {
     () => (config ? buildSetupRecommendations(config, metadata, secretStatus, provider, locale) : []),
     [config, metadata, secretStatus, provider, locale],
   );
+  const currentMarketProfile = config ? config.marketProfiles?.[config.stockMarket] : undefined;
 
   function updateConfig<K extends keyof WebConfig>(key: K, value: WebConfig[K]) {
     setConfig((current) => (current ? { ...current, [key]: value } : current));
+  }
+
+  function changeStockMarket(value: string) {
+    if (!config) return;
+    setConfig({ ...config, stockMarket: value });
   }
 
   function changeProvider(nextProvider: string) {
@@ -837,6 +874,15 @@ function App() {
     if (firstTicker) {
       updateConfig('ticker', firstTicker);
     }
+  }
+
+  function updateMarketProfile(market: string, patch: Partial<WebConfig['marketProfiles'][string]>) {
+    if (!config) return;
+    const current = config.marketProfiles?.[market] ?? { region: '', weight: '1', marketProfile: '' };
+    updateConfig('marketProfiles', {
+      ...(config.marketProfiles ?? {}),
+      [market]: { ...current, ...patch },
+    });
   }
 
   function updateCustomDataBaseUrl(category: string, value: string) {
@@ -1148,6 +1194,8 @@ function App() {
   const agentStatus = progress?.agents ?? {};
   const timeEstimate = estimateRunTime(events, agentStatus, progress, activeRun, locale);
   const configuredTickerCount = parseTickerList(tickerList || config.ticker).length || 1;
+  const firstInputTicker = parseTickerList(tickerList || config.ticker)[0] ?? config.ticker;
+  const effectiveTicker = formatMarketTicker(firstInputTicker, currentMarketProfile);
   const customRouteCount = Object.keys(config.toolVendors ?? {}).length + Object.values(config.llmRoutes ?? {}).filter((route) => route.enabled).length;
   const displayedReports: ReportsPayload | null =
     selectedHistoryId && viewedArchive
@@ -1324,6 +1372,60 @@ function App() {
                   <Save size={16} />
                   {t.saveSecrets}
                 </button>
+                <button className="secondary" onClick={saveConfig} disabled={isSaving}>
+                  <Save size={16} />
+                  {t.saveDefaults}
+                </button>
+              </div>
+            </Panel>
+
+            <Panel title={t.marketSettings} icon={<BarChart3 size={17} />}>
+              <p className="hint">
+                {locale === 'zh'
+                  ? '用户只输入裸代码；运行前会按所选市场自动拼接 .region，并把 market_profile prompt 注入到智能体上下文。'
+                  : 'Users enter bare symbols; before execution the backend appends .region for the selected market and injects a market_profile prompt into the agent context.'}
+              </p>
+              <div className="market-profile-grid">
+                {metadata.stockMarkets.map((market) => {
+                  const profile = config.marketProfiles?.[market.key] ?? { region: '', weight: '1', marketProfile: '' };
+                  return (
+                    <section key={market.key} className={config.stockMarket === market.key ? 'market-profile-card active' : 'market-profile-card'}>
+                      <div className="route-card-head">
+                        <div>
+                          <strong>{stockMarketLabels[locale][market.key] ?? market.label}</strong>
+                          <small>{market.description}</small>
+                        </div>
+                      </div>
+                      <div className="market-profile-fields">
+                        <label className="field">
+                          <span>{t.marketRegion}</span>
+                          <input
+                            value={profile.region}
+                            onChange={(event) => updateMarketProfile(market.key, { region: event.target.value })}
+                            placeholder={market.key === 'us' ? 'us' : market.key === 'hk' ? 'hk' : market.key === 'sh' ? 'ss' : 'sz'}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>{t.marketWeight}</span>
+                          <input
+                            value={profile.weight}
+                            onChange={(event) => updateMarketProfile(market.key, { weight: event.target.value })}
+                            inputMode="decimal"
+                          />
+                        </label>
+                      </div>
+                      <label className="field">
+                        <span>{t.marketPrompt}</span>
+                        <textarea
+                          value={profile.marketProfile}
+                          onChange={(event) => updateMarketProfile(market.key, { marketProfile: event.target.value })}
+                        />
+                      </label>
+                    </section>
+                  );
+                })}
+              </div>
+              <div className="actions-row">
                 <button className="secondary" onClick={saveConfig} disabled={isSaving}>
                   <Save size={16} />
                   {t.saveDefaults}
@@ -1756,7 +1858,7 @@ function App() {
           <div className="overview-card flow-card">
             <div>
               <span>{t.activeWorkflow}</span>
-              <strong>{activeRun?.ticker ?? parseTickerList(tickerList || config.ticker)[0] ?? config.ticker}</strong>
+              <strong>{activeRun?.ticker ?? effectiveTicker}</strong>
             </div>
             <div className={`flow-line ${activeRun?.status ?? 'idle'}`}>
               <i />
@@ -1790,8 +1892,19 @@ function App() {
             <div className="form-grid">
               <label className="field ticker-list-field">
                 <span>{t.tickerList}</span>
-                <textarea value={tickerList} onChange={(event) => changeTickerList(event.target.value)} placeholder="SPY, 0700.HK, AAPL" />
+                <textarea value={tickerList} onChange={(event) => changeTickerList(event.target.value)} placeholder="SPY, 0700, 600519, 000001" />
                 <small>{t.tickerListHint}</small>
+              </label>
+              <label className="field">
+                <span>{t.stockMarket}</span>
+                <select value={config.stockMarket} onChange={(event) => changeStockMarket(event.target.value)}>
+                  {metadata.stockMarkets.map((market) => (
+                    <option key={market.key} value={market.key}>
+                      {stockMarketLabels[locale][market.key] ?? market.label}
+                    </option>
+                  ))}
+                </select>
+                <small className="field-hint">{t.effectiveTicker}: {effectiveTicker}</small>
               </label>
               <label className="field">
                 <span>{t.analysisDate}</span>
@@ -2625,6 +2738,13 @@ function parseTickerList(value: string) {
       if (ticker && !tickers.includes(ticker)) tickers.push(ticker);
     });
   return tickers.slice(0, 50);
+}
+
+function formatMarketTicker(ticker: string, profile?: { region?: string | null }) {
+  const symbol = ticker.trim().replace(/\s+/g, '').toUpperCase();
+  const region = profile?.region?.trim().replace(/^\.+/, '') ?? '';
+  if (!symbol || !region || symbol.includes('.')) return symbol;
+  return `${symbol}.${region}`;
 }
 
 function outputLanguageLocale(language: string): Locale {

@@ -14,6 +14,7 @@ from web.backend.app import app
 from web.backend.backtesting import BacktestEngine
 from web.backend.constants import CUSTOM_DATA_VENDOR, CUSTOM_OPENAI_PROVIDER, metadata_payload
 from web.backend.custom_data import configure_custom_data_interfaces
+from web.backend.markets import format_market_ticker, market_profile_prompt
 from web.backend.model_discovery import fetch_provider_models
 from web.backend.runner import RunManager
 from web.backend.schemas import BacktestPriceBar, BacktestScheduleConfig, ModelFetchRequest, PricingConfig, RechargeRequest, RunInfo, RunReports, RunRequest, WebConfig
@@ -36,6 +37,7 @@ def test_metadata_exposes_configurable_catalogs():
     assert any(provider["value"] == CUSTOM_OPENAI_PROVIDER for provider in payload["providers"])
     assert any(provider["value"] == "moonshot" and provider["apiKeyField"] == "MOONSHOT_API_KEY" for provider in payload["providers"])
     assert any(language["value"] == "Chinese" for language in payload["languages"])
+    assert any(market["key"] == "hk" for market in payload["stockMarkets"])
     assert "openai" in payload["models"]
     assert CUSTOM_OPENAI_PROVIDER in payload["models"]
     assert "moonshot" in payload["models"]
@@ -54,6 +56,30 @@ def test_web_config_normalizes_ticker_and_rejects_future_date():
 
     with pytest.raises(ValidationError):
         WebConfig(ticker="SPY", analysisDate=date.today() + timedelta(days=1))
+
+
+def test_market_profiles_format_bare_tickers_and_prompt_context():
+    config = WebConfig(
+        ticker="0700",
+        stockMarket="hk",
+        marketProfiles={
+            "hk": {
+                "region": "hk",
+                "weight": "1.35",
+                "marketProfile": "HK profile with southbound flow.",
+            }
+        },
+    )
+
+    assert format_market_ticker("0700", config) == "0700.hk"
+    assert format_market_ticker("0700.HK", config) == "0700.HK"
+    prompt = market_profile_prompt("0700", "0700.hk", config)
+    assert "Hong Kong" in prompt
+    assert "0700.hk" in prompt
+    assert "1.35" in prompt
+
+    with pytest.raises(ValidationError):
+        WebConfig(stockMarket="hk", marketProfiles={"hk": {"region": "h.k"}})
 
 
 def test_storage_masks_and_never_returns_plain_secret(tmp_path):
@@ -887,3 +913,75 @@ def test_run_manager_completes_with_mock_graph(monkeypatch, tmp_path):
     history = storage.list_report_history()
     assert history.items[0].run_id == run.id
     assert storage.load_report_history(run.id) is not None
+
+
+def test_run_manager_wraps_market_profile_before_graph_call(monkeypatch, tmp_path):
+    captured = {}
+
+    class FakePropagator:
+        def create_initial_state(self, ticker, trade_date):
+            return {"messages": [("human", ticker)], "company_of_interest": ticker, "trade_date": trade_date}
+
+        def get_graph_args(self, callbacks=None):
+            return {}
+
+    class FakeCompiledGraph:
+        def stream(self, state, **kwargs):
+            captured.update(state)
+            yield {
+                "messages": [],
+                "company_of_interest": state["company_of_interest"],
+                "trade_date": state["trade_date"],
+                "market_report": "Market report",
+                "investment_debate_state": {"judge_decision": "Research manager decision"},
+                "trader_investment_plan": "Trading plan",
+                "risk_debate_state": {"judge_decision": "Buy"},
+                "final_trade_decision": "Buy",
+            }
+
+    class FakeMemoryLog:
+        def store_decision(self, **kwargs):
+            return None
+
+    class FakeTradingAgentsGraph:
+        def __init__(self, selected_analysts, config, debug, callbacks):
+            self.propagator = FakePropagator()
+            self.graph = FakeCompiledGraph()
+            self.workflow = self
+            self.memory_log = FakeMemoryLog()
+
+        def compile(self, checkpointer=None):
+            return self.graph
+
+        def process_signal(self, value):
+            return "BUY"
+
+        def _log_state(self, trade_date, final_state):
+            return None
+
+        def _resolve_pending_entries(self, ticker):
+            captured["resolved_ticker"] = ticker
+
+    monkeypatch.setattr("web.backend.runner.TradingAgentsGraph", FakeTradingAgentsGraph)
+
+    storage = WebStorage(tmp_path)
+    manager = RunManager(storage)
+    config = WebConfig(
+        ticker="0700",
+        analysisDate=date.today(),
+        analysts=["market"],
+        stockMarket="hk",
+        marketProfiles={"hk": {"region": "hk", "weight": "1.35", "marketProfile": "HK / China linkage."}},
+    )
+    run = manager.create_run(RunRequest(ticker="0700", analysisDate=date.today(), config=config))
+
+    deadline = time.time() + 2
+    while run.status not in {"succeeded", "failed"} and time.time() < deadline:
+        time.sleep(0.02)
+
+    assert run.status == "succeeded"
+    assert run.request.ticker == "0700.hk"
+    assert captured["resolved_ticker"] == "0700.hk"
+    assert captured["messages"][0][0] == "system"
+    assert "Hong Kong" in captured["messages"][0][1]
+    assert "1.35" in captured["messages"][0][1]

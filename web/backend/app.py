@@ -95,6 +95,7 @@ def user_run_config(request: RunRequest, user: UserPublic) -> RunRequest:
     allowed = {
         "ticker": request.ticker,
         "analysis_date": request.analysis_date,
+        "stock_market": request.config.stock_market,
         "analysts": request.config.analysts,
         "research_depth": request.config.research_depth,
     }
@@ -116,6 +117,7 @@ def user_batch_config(request: BatchRunRequest, user: UserPublic) -> BatchRunReq
             update={
                 "ticker": request.tickers[0],
                 "analysis_date": request.analysis_date,
+                "stock_market": request.config.stock_market,
                 "analysts": request.config.analysts,
                 "research_depth": request.config.research_depth,
             }

@@ -666,6 +666,11 @@ class WebStorage:
 
     def runtime_config(self, web_config: WebConfig) -> dict[str, Any]:
         config = dict(DEFAULT_CONFIG)
+        config["stock_market"] = web_config.stock_market
+        config["market_profiles"] = {
+            key: value.model_dump(mode="json", by_alias=True)
+            for key, value in web_config.market_profiles.items()
+        }
         config["data_vendors"] = dict(web_config.data_vendors)
         config["tool_vendors"] = dict(web_config.tool_vendors)
         config["llm_routes"] = {

@@ -13,6 +13,7 @@ export type Option<T = string> = {
 export type Metadata = {
   analysts: Option[];
   researchDepths: Option<number>[];
+  stockMarkets: Array<{ key: string; label: string; description: string }>;
   providers: Option[];
   models: Record<string, Record<'quick' | 'deep', Option[]>>;
   languages: Option[];
@@ -42,9 +43,17 @@ export type LLMRouteConfig = {
   modelId: string | null;
 };
 
+export type MarketProfileConfig = {
+  region: string;
+  weight: string;
+  marketProfile: string;
+};
+
 export type WebConfig = {
   ticker: string;
   analysisDate: string;
+  stockMarket: string;
+  marketProfiles: Record<string, MarketProfileConfig>;
   outputLanguage: string;
   analysts: string[];
   researchDepth: 1 | 3 | 5;

@@ -55,6 +55,52 @@ RESEARCH_DEPTHS = [
     },
 ]
 
+STOCK_MARKETS = [
+    {
+        "key": "us",
+        "label": "US stocks",
+        "description": "US-listed equities and ETFs. Leave region empty for yfinance-style symbols, or set your own suffix such as us.",
+    },
+    {
+        "key": "hk",
+        "label": "Hong Kong stocks",
+        "description": "Hong Kong listed equities. Bare numeric tickers are wrapped with the configured region suffix.",
+    },
+    {
+        "key": "sh",
+        "label": "Shanghai A shares",
+        "description": "Shanghai-listed A shares. Configure region as SS, SH, or any suffix required by your data source.",
+    },
+    {
+        "key": "sz",
+        "label": "Shenzhen A shares",
+        "description": "Shenzhen-listed A shares. Configure region as SZ or any suffix required by your data source.",
+    },
+]
+
+DEFAULT_MARKET_PROFILES = {
+    "us": {
+        "region": "",
+        "weight": "1",
+        "marketProfile": "US equities / ETFs. Emphasize USD pricing, US exchange hours, SEC filings, Fed policy, sector rotation, and US macro context.",
+    },
+    "hk": {
+        "region": "HK",
+        "weight": "1.15",
+        "marketProfile": "HK market profile. Emphasize HKD pricing, Hong Kong exchange calendar, mainland China linkage, southbound flow, H-share/ADR dual listings, and local regulatory context.",
+    },
+    "sh": {
+        "region": "SS",
+        "weight": "1.2",
+        "marketProfile": "CN-A Shanghai market profile. Emphasize RMB pricing, SSE market structure, daily price limits, northbound/southbound flow, policy sensitivity, and mainland macro/liquidity context.",
+    },
+    "sz": {
+        "region": "SZ",
+        "weight": "1.2",
+        "marketProfile": "CN-A Shenzhen market profile. Emphasize RMB pricing, SZSE/Growth Enterprise characteristics, daily price limits, policy sensitivity, and mainland liquidity/risk appetite.",
+    },
+}
+
 PROVIDERS = [
     {
         "label": "OpenAI",
@@ -477,6 +523,7 @@ def metadata_payload() -> dict[str, Any]:
     return {
         "analysts": analyst_options(),
         "researchDepths": RESEARCH_DEPTHS,
+        "stockMarkets": STOCK_MARKETS,
         "providers": PROVIDERS,
         "models": model_options(),
         "languages": OUTPUT_LANGUAGES,

@@ -594,6 +594,13 @@ textarea {
   line-height: 1.45;
 }
 
+.field-hint {
+  color: #83e4b9;
+  font-size: 11px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
 .tool-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 170px;
@@ -786,6 +793,32 @@ textarea {
 
 .route-grid {
   display: grid;
+  gap: 10px;
+}
+
+.market-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.market-profile-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #25373c;
+  background: #0c1215;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.market-profile-card.active {
+  border-color: #4c8e77;
+}
+
+.market-profile-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 130px;
   gap: 10px;
 }
 
@@ -1506,6 +1539,8 @@ textarea {
   .endpoint-grid,
   .batch-list,
   .route-fields,
+  .market-profile-grid,
+  .market-profile-fields,
   .observation-grid,
   .backtest-settings-grid,
   .backtest-summary-grid,

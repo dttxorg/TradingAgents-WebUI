@@ -31,6 +31,7 @@ from .constants import (
 )
 from .custom_data import configure_custom_data_interfaces
 from .llm_routing import has_enabled_llm_routes, routed_workflow
+from .markets import apply_market_profile, format_market_ticker, market_profile_prompt
 from .schemas import BatchRunRequest, RunBilling, RunInfo, RunReports, RunRequest, UserPublic, WebConfig
 from .storage import WebStorage
 
@@ -123,6 +124,7 @@ class RunRecord:
     id: str
     request: RunRequest
     config: WebConfig
+    raw_ticker: str | None = None
     user_id: str | None = None
     order_id: str | None = None
     billing: RunBilling | None = None
@@ -189,19 +191,22 @@ class RunManager:
     def create_run(self, request: RunRequest, user: UserPublic | None = None) -> RunRecord:
         config = request.config or self.storage.load_config()
         self._ensure_worker_count(config.max_parallel_runs)
+        raw_ticker = request.ticker
+        runtime_ticker = format_market_ticker(raw_ticker, config)
         config = config.model_copy(
             update={
-                "ticker": request.ticker,
+                "ticker": runtime_ticker,
                 "analysis_date": request.analysis_date,
             }
         )
+        request = request.model_copy(update={"ticker": runtime_ticker})
         run_id = str(uuid.uuid4())
         billing = None
         order_id = None
         if user is not None:
             billing = self.storage.preauthorize_analysis(user.id, run_id, config)
             order_id = billing.order_id
-        run = RunRecord(id=run_id, request=request, config=config, user_id=user.id if user else None, order_id=order_id, billing=billing)
+        run = RunRecord(id=run_id, request=request, config=config, raw_ticker=raw_ticker, user_id=user.id if user else None, order_id=order_id, billing=billing)
         with self._lock:
             self.runs[run.id] = run
         run.emit(
@@ -358,6 +363,10 @@ class RunManager:
                 run.request.ticker,
                 str(run.request.analysis_date),
             )
+            init_agent_state = apply_market_profile(
+                init_agent_state,
+                market_profile_prompt(run.raw_ticker or run.config.ticker, run.request.ticker, run.config),
+            )
             args = graph.propagator.get_graph_args(callbacks=[stats_handler, event_handler])
             if runtime_config.get("checkpoint_enabled"):
                 checkpointer_ctx = get_checkpointer(runtime_config["data_cache_dir"], run.request.ticker)
@@ -376,6 +385,9 @@ class RunManager:
                     "ticker": run.request.ticker,
                     "analysisDate": str(run.request.analysis_date),
                     "provider": run.config.llm_provider,
+                    "stockMarket": run.config.stock_market,
+                    "inputTicker": run.raw_ticker or run.config.ticker,
+                    "marketProfile": runtime_config.get("market_profiles", {}).get(run.config.stock_market, {}),
                     "outputLanguage": run.config.output_language,
                     "analysts": selected_analysts,
                     "llmRoutes": {

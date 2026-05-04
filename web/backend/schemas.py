@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from cli.utils import normalize_ticker_symbol
 from tradingagents.default_config import DEFAULT_CONFIG
 
-from .constants import CUSTOM_DATA_METHODS, CUSTOM_DATA_VENDOR, CUSTOM_OPENAI_PROVIDER, DATA_VENDOR_CATEGORIES, LLM_ROUTE_TARGETS, PROVIDERS, analyst_options
+from .constants import CUSTOM_DATA_METHODS, CUSTOM_DATA_VENDOR, CUSTOM_OPENAI_PROVIDER, DATA_VENDOR_CATEGORIES, DEFAULT_MARKET_PROFILES, LLM_ROUTE_TARGETS, PROVIDERS, STOCK_MARKETS, analyst_options
 
 
 def to_camel(value: str) -> str:
@@ -39,6 +39,10 @@ def _default_custom_data_interfaces() -> dict[str, dict[str, Any]]:
     }
 
 
+def _default_market_profiles() -> dict[str, dict[str, Any]]:
+    return {key: dict(value) for key, value in DEFAULT_MARKET_PROFILES.items()}
+
+
 def _allowed_values(items: list[dict[str, Any]], key: str = "value") -> set[Any]:
     return {item[key] for item in items}
 
@@ -58,6 +62,7 @@ CUSTOM_METHOD_CATEGORIES = {
     for method in CUSTOM_DATA_METHODS
 }
 LLM_ROUTE_KEYS = {item["key"] for item in LLM_ROUTE_TARGETS}
+STOCK_MARKET_KEYS = {item["key"] for item in STOCK_MARKETS}
 
 
 class CustomDataInterfaceConfig(APIModel):
@@ -121,9 +126,44 @@ class LLMRouteConfig(APIModel):
         return cleaned or None
 
 
+class MarketProfileConfig(APIModel):
+    region: str = ""
+    weight: Decimal = Decimal("1")
+    market_profile: str = ""
+
+    @field_validator("region")
+    @classmethod
+    def validate_region(cls, value: str) -> str:
+        region = value.strip().lstrip(".")
+        if "." in region:
+            raise ValueError("Market region should not include dots.")
+        if len(region) > 16:
+            raise ValueError("Market region must be 16 characters or fewer.")
+        return region
+
+    @field_validator("weight")
+    @classmethod
+    def validate_weight(cls, value: Decimal) -> Decimal:
+        if value < 0 or value > 10:
+            raise ValueError("Market weight must be between 0 and 10.")
+        return value
+
+    @field_validator("market_profile")
+    @classmethod
+    def validate_market_profile(cls, value: str) -> str:
+        return value.strip()[:2000]
+
+
 class WebConfig(APIModel):
     ticker: str = "SPY"
     analysis_date: date = Field(default_factory=date.today)
+    stock_market: str = "us"
+    market_profiles: dict[str, MarketProfileConfig] = Field(
+        default_factory=lambda: {
+            key: MarketProfileConfig.model_validate(value)
+            for key, value in _default_market_profiles().items()
+        }
+    )
     output_language: str = "English"
     analysts: list[str] = Field(default_factory=lambda: ["market", "social", "news", "fundamentals"])
     research_depth: Literal[1, 3, 5] = 1
@@ -154,6 +194,14 @@ class WebConfig(APIModel):
         if not ticker:
             raise ValueError("Ticker is required.")
         return ticker
+
+    @field_validator("stock_market")
+    @classmethod
+    def validate_stock_market(cls, value: str) -> str:
+        market = value.strip().lower()
+        if market not in STOCK_MARKET_KEYS:
+            raise ValueError(f"Unsupported stock market: {value}")
+        return market
 
     @field_validator("analysis_date")
     @classmethod
@@ -251,6 +299,20 @@ class WebConfig(APIModel):
                 raise ValueError(f"Unsupported LLM route target: {key}")
             routes[key] = route
         return routes
+
+    @field_validator("market_profiles")
+    @classmethod
+    def validate_market_profiles(cls, value: dict[str, MarketProfileConfig]) -> dict[str, MarketProfileConfig]:
+        profiles = {
+            key: MarketProfileConfig.model_validate(payload)
+            for key, payload in _default_market_profiles().items()
+        }
+        for key, profile in value.items():
+            market = key.strip().lower()
+            if market not in STOCK_MARKET_KEYS:
+                raise ValueError(f"Unsupported market profile: {key}")
+            profiles[market] = profile
+        return profiles
 
     @model_validator(mode="after")
     def validate_custom_interfaces(self) -> "WebConfig":
