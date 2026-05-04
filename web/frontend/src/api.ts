@@ -24,6 +24,50 @@ import type {
   WebConfig,
 } from './types';
 
+function formatErrorValue(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((item) => formatErrorValue(item))
+      .filter((item): item is string => Boolean(item));
+    return parts.length > 0 ? parts.join('\n') : null;
+  }
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const message = formatErrorValue(record.message ?? record.msg ?? record.error);
+    if (message) {
+      const location = Array.isArray(record.loc)
+        ? record.loc
+            .map((item) => String(item))
+            .filter((item) => item !== 'body')
+            .join('.')
+        : '';
+      return location ? `${location}: ${message}` : message;
+    }
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+function apiErrorMessage(body: string, statusText: string): string {
+  if (!body) return statusText;
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    if (typeof parsed === 'object' && parsed !== null && ('detail' in parsed || 'message' in parsed || 'error' in parsed)) {
+      return formatErrorValue((parsed as Record<string, unknown>).detail ?? (parsed as Record<string, unknown>).message ?? (parsed as Record<string, unknown>).error) ?? statusText;
+    }
+    return formatErrorValue(parsed) ?? statusText;
+  } catch {
+    return body;
+  }
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     headers: { 'Content-Type': 'application/json', ...(options?.headers ?? {}) },
@@ -32,13 +76,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const body = await response.text();
-    let message = body || response.statusText;
-    try {
-      const parsed = JSON.parse(body);
-      message = parsed.detail || parsed.message || message;
-    } catch {
-      // Keep the raw response text when the server did not send JSON.
-    }
+    const message = apiErrorMessage(body, response.statusText);
     throw new Error(message);
   }
   return response.json() as Promise<T>;

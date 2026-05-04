@@ -192,6 +192,9 @@ const messages = {
     password: 'Password',
     displayName: 'Display name',
     initialBalance: 'Initial balance',
+    usernameTooShort: 'Username must be at least 3 characters.',
+    passwordTooShort: 'Password must be at least 8 characters.',
+    invalidInitialBalance: 'Initial balance must be a valid number.',
     signIn: 'Sign in',
     createAdmin: 'Create admin',
     signOut: 'Sign out',
@@ -377,6 +380,9 @@ const messages = {
     password: '密码',
     displayName: '显示名称',
     initialBalance: '初始余额',
+    usernameTooShort: '用户名至少需要 3 个字符。',
+    passwordTooShort: '密码至少需要 8 个字符。',
+    invalidInitialBalance: '初始余额必须是有效数字。',
     signIn: '登录',
     createAdmin: '创建管理员',
     signOut: '退出登录',
@@ -2232,11 +2238,27 @@ function AuthScreen({
     event.preventDefault();
     setLoading(true);
     setError(null);
+    const trimmedUsername = username.trim();
+    if (trimmedUsername.length < 3) {
+      setError(labels.usernameTooShort);
+      setLoading(false);
+      return;
+    }
+    if (password.length < 8) {
+      setError(labels.passwordTooShort);
+      setLoading(false);
+      return;
+    }
+    if (mode === 'bootstrap' && (!initialBalance.trim() || Number.isNaN(Number(initialBalance)))) {
+      setError(labels.invalidInitialBalance);
+      setLoading(false);
+      return;
+    }
     try {
       const session =
         mode === 'bootstrap'
-          ? await api.bootstrap({ username, password, displayName: displayName || null, initialBalance })
-          : await api.login(username, password);
+          ? await api.bootstrap({ username: trimmedUsername, password, displayName: displayName || null, initialBalance })
+          : await api.login(trimmedUsername, password);
       await onAuthenticated(session.user);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
