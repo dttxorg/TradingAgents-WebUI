@@ -53,6 +53,11 @@ import './styles.css';
 
 type Locale = 'en' | 'zh';
 type ViewMode = 'workspace' | 'settings';
+type ImportMetaWithEnv = ImportMeta & { env?: Record<string, string | undefined> };
+
+const LONGBRIDGE_PROXY_VENDOR = 'longbridge_proxy';
+const LONGBRIDGE_PROXY_ENV =
+  ((import.meta as ImportMetaWithEnv).env?.VITE_LONGBRIDGE_PROXY_URL ?? '').trim();
 
 const messages = {
   en: {
@@ -139,6 +144,8 @@ const messages = {
     customInterfaces: 'Settings / Custom APIs',
     customOpenAiHint: 'OpenAI-compatible Base URL, model IDs, and CUSTOM_OPENAI_API_KEY.',
     customDataHint: 'Choose custom as a data vendor, then point that category at an HTTP service.',
+    longbridgeProxyBaseUrl: 'Longbridge Proxy Base URL',
+    longbridgeProxyPlaceholder: 'https://longbridge-proxy.example.com',
     methodOverrides: 'Method-level data routes',
     useCategoryDefault: 'Use category default',
     setupRecommendations: 'Setup recommendations',
@@ -327,6 +334,8 @@ const messages = {
     customInterfaces: '设置 / 自定义接口',
     customOpenAiHint: 'OpenAI-compatible Base URL、模型 ID 和 CUSTOM_OPENAI_API_KEY。',
     customDataHint: '将数据源选择为 custom 后，把对应分类指向你的 HTTP 数据服务。',
+    longbridgeProxyBaseUrl: 'Longbridge Proxy Base URL',
+    longbridgeProxyPlaceholder: 'https://longbridge-proxy.example.com',
     methodOverrides: '按后端方法单独设置数据源',
     useCategoryDefault: '使用分类默认值',
     setupRecommendations: '设置建议',
@@ -570,6 +579,7 @@ function App() {
   const [rechargeDraft, setRechargeDraft] = useState<Record<string, string>>({});
   const [secretDraft, setSecretDraft] = useState<Record<string, string>>({});
   const [discoveredModels, setDiscoveredModels] = useState<Record<string, Array<{ label: string; value: string }>>>({});
+  const [longbridgeProxyBaseUrl, setLongbridgeProxyBaseUrl] = useState(LONGBRIDGE_PROXY_ENV);
   const [activeRun, setActiveRun] = useState<RunInfo | null>(null);
   const [batchRuns, setBatchRuns] = useState<RunInfo[]>([]);
   const [events, setEvents] = useState<RunEvent[]>([]);
@@ -600,8 +610,9 @@ function App() {
       api.orders(),
       api.backtestConfig(),
     ]);
-    setMetadata({ ...emptyMetadata, ...metadataValue });
-    setConfig(configValue);
+    const loadedMetadata = { ...emptyMetadata, ...metadataValue };
+    setMetadata(loadedMetadata);
+    setConfig(hydrateLongbridgeProxyConfig(configValue, longbridgeProxyBaseUrl, loadedMetadata.customDataMethods));
     setTickerList(configValue.ticker);
     setPublicPricing(pricingValue);
     setHistory(historyValue.items);
@@ -813,8 +824,8 @@ function App() {
   const customNeedsManualModel = isCustomOpenAi && !discoveredModels[config?.llmProvider ?? '']?.length;
   const outputLocale = outputLanguageLocale(config?.outputLanguage ?? 'English');
   const setupRecommendations = useMemo(
-    () => (config ? buildSetupRecommendations(config, metadata, secretStatus, provider, locale) : []),
-    [config, metadata, secretStatus, provider, locale],
+    () => (config ? buildSetupRecommendations(config, metadata, secretStatus, provider, locale, longbridgeProxyBaseUrl) : []),
+    [config, metadata, secretStatus, provider, locale, longbridgeProxyBaseUrl],
   );
   const currentMarketProfile = config ? config.marketProfiles?.[config.stockMarket] : undefined;
 
@@ -851,18 +862,28 @@ function App() {
 
   function updateVendor(key: string, value: string) {
     if (!config) return;
-    updateConfig('dataVendors', { ...config.dataVendors, [key]: value });
+    const nextConfig = {
+      ...config,
+      dataVendors: { ...config.dataVendors, [key]: normalizeDisplayVendor(value) },
+    };
+    setConfig(isLongbridgeProxyVendor(value) ? syncLongbridgeProxyBaseUrl(nextConfig, longbridgeProxyBaseUrl, metadata.customDataMethods) : nextConfig);
   }
 
   function updateToolVendor(method: string, value: string) {
     if (!config) return;
     const next = { ...(config.toolVendors ?? {}) };
     if (value) {
-      next[method] = value;
+      next[method] = normalizeDisplayVendor(value);
     } else {
       delete next[method];
     }
-    updateConfig('toolVendors', next);
+    const nextConfig = { ...config, toolVendors: next };
+    setConfig(isLongbridgeProxyVendor(value) ? syncLongbridgeProxyBaseUrl(nextConfig, longbridgeProxyBaseUrl, metadata.customDataMethods) : nextConfig);
+  }
+
+  function updateLongbridgeProxyBaseUrl(value: string) {
+    setLongbridgeProxyBaseUrl(value);
+    setConfig((current) => (current ? hydrateLongbridgeProxyConfig(current, value, metadata.customDataMethods) : current));
   }
 
   function updateLlmRoute(routeKey: string, patch: Partial<WebConfig['llmRoutes'][string]>) {
@@ -894,10 +915,12 @@ function App() {
   function updateCustomDataBaseUrl(category: string, value: string) {
     if (!config) return;
     const current = config.customDataInterfaces[category] ?? { baseUrl: null, endpoints: {} };
-    updateConfig('customDataInterfaces', {
+    const nextInterfaces = {
       ...config.customDataInterfaces,
       [category]: { ...current, baseUrl: value || null },
-    });
+    };
+    const nextConfig = { ...config, customDataInterfaces: nextInterfaces };
+    setConfig(isLongbridgeProxyBaseUrl(value, longbridgeProxyBaseUrl) ? hydrateLongbridgeProxyConfig(nextConfig, value, metadata.customDataMethods) : nextConfig);
   }
 
   function updateCustomDataEndpoint(category: string, method: string, value: string) {
@@ -921,8 +944,8 @@ function App() {
     setSaving(true);
     setError(null);
     try {
-      const saved = await api.saveConfig(config);
-      setConfig(saved);
+      const saved = await api.saveConfig(configForBackend(config, longbridgeProxyBaseUrl, metadata.customDataMethods));
+      setConfig(hydrateLongbridgeProxyConfig(saved, longbridgeProxyBaseUrl, metadata.customDataMethods));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1023,7 +1046,7 @@ function App() {
       setError(locale === 'zh' ? '至少需要一个股票代码。' : 'At least one ticker is required.');
       return;
     }
-    const runConfig = { ...config, ticker: tickers[0] };
+    const runConfig = configForBackend({ ...config, ticker: tickers[0] }, longbridgeProxyBaseUrl, metadata.customDataMethods);
     setRunning(true);
     setError(null);
     setEvents([]);
@@ -1033,7 +1056,7 @@ function App() {
     setBatchRuns([]);
     try {
       const saved = isAdmin ? await api.saveConfig(runConfig) : runConfig;
-      if (isAdmin) setConfig(saved);
+      if (isAdmin) setConfig(hydrateLongbridgeProxyConfig(saved, longbridgeProxyBaseUrl, metadata.customDataMethods));
       if (tickers.length > 1) {
         const batch = await api.createBatchRuns(tickers, saved);
         setBatchRuns(batch.runs);
@@ -1528,13 +1551,21 @@ function App() {
             <Panel title={t.customInterfaces} icon={<Server size={17} />}>
               <p className="hint">{t.customOpenAiHint}</p>
               <p className="hint">{t.customDataHint}</p>
+              <label className="field">
+                <span>{t.longbridgeProxyBaseUrl}</span>
+                <input
+                  value={longbridgeProxyBaseUrl}
+                  onChange={(event) => updateLongbridgeProxyBaseUrl(event.target.value)}
+                  placeholder={LONGBRIDGE_PROXY_ENV || t.longbridgeProxyPlaceholder}
+                />
+              </label>
               <div className="custom-interface-list">
                 {metadata.dataVendorCategories.map((category) => {
                   const settings = config.customDataInterfaces[category.key] ?? { baseUrl: null, endpoints: {} };
                   const methods = metadata.customDataMethods.filter((method) => method.category === category.key);
                   const selectedCustom =
-                    config.dataVendors[category.key] === 'custom' ||
-                    methods.some((method) => (config.toolVendors ?? {})[method.method] === 'custom');
+                    isCustomLikeDataVendor(config.dataVendors[category.key]) ||
+                    methods.some((method) => isCustomLikeDataVendor((config.toolVendors ?? {})[method.method]));
                   return (
                     <section key={category.key} className={selectedCustom ? 'custom-interface active' : 'custom-interface'}>
                       <label className="field">
@@ -1821,9 +1852,9 @@ function App() {
                 <label key={category.key} className="field">
                   <span>{dataVendorLabels[locale][category.key] ?? category.label}</span>
                   <select value={config.dataVendors[category.key] ?? ''} onChange={(event) => updateVendor(category.key, event.target.value)}>
-                    {category.options.map((option) => (
+                    {vendorOptions(category.options).map((option) => (
                       <option key={option} value={option}>
-                        {option}
+                        {dataVendorOptionLabel(option, locale)}
                       </option>
                     ))}
                   </select>
@@ -1844,10 +1875,10 @@ function App() {
                         <small>{dataVendorLabels[locale][method.category] ?? category?.label ?? method.category}</small>
                       </span>
                       <select value={(config.toolVendors ?? {})[method.method] ?? ''} onChange={(event) => updateToolVendor(method.method, event.target.value)}>
-                        <option value="">{t.useCategoryDefault} ({categoryVendor})</option>
-                        {(category?.options ?? []).map((option) => (
+                        <option value="">{t.useCategoryDefault} ({dataVendorOptionLabel(categoryVendor, locale)})</option>
+                        {vendorOptions(category?.options ?? []).map((option) => (
                           <option key={option} value={option}>
-                            {option}
+                            {dataVendorOptionLabel(option, locale)}
                           </option>
                         ))}
                       </select>
@@ -2774,12 +2805,114 @@ function outputLanguageLocale(language: string): Locale {
   return normalized.startsWith('chinese') || normalized === '中文' || normalized.startsWith('zh') ? 'zh' : 'en';
 }
 
+function isLongbridgeProxyVendor(vendor: string | null | undefined) {
+  return vendor === LONGBRIDGE_PROXY_VENDOR || vendor === 'longbridge';
+}
+
+function isCustomLikeDataVendor(vendor: string | null | undefined) {
+  return vendor === 'custom' || isLongbridgeProxyVendor(vendor);
+}
+
+function normalizeDisplayVendor(vendor: string) {
+  return isLongbridgeProxyVendor(vendor) ? LONGBRIDGE_PROXY_VENDOR : vendor;
+}
+
+function normalizedBaseUrl(value: string | null | undefined) {
+  return (value ?? '').trim().replace(/\/+$/, '');
+}
+
+function isLongbridgeProxyBaseUrl(value: string | null | undefined, proxyBaseUrl: string | null | undefined) {
+  const normalizedValue = normalizedBaseUrl(value);
+  const normalizedProxy = normalizedBaseUrl(proxyBaseUrl);
+  return Boolean(normalizedValue && normalizedProxy && normalizedValue === normalizedProxy);
+}
+
+function vendorOptions(options: string[]) {
+  return options.includes(LONGBRIDGE_PROXY_VENDOR) ? options : [...options, LONGBRIDGE_PROXY_VENDOR];
+}
+
+function dataVendorOptionLabel(option: string, locale: Locale) {
+  if (isLongbridgeProxyVendor(option)) {
+    return locale === 'zh' ? 'longbridge_proxy / 长桥只读代理' : 'longbridge_proxy / Longbridge read-only proxy';
+  }
+  return option;
+}
+
+function methodCategoryMap(methods: Metadata['customDataMethods']) {
+  return Object.fromEntries(methods.map((method) => [method.method, method.category]));
+}
+
+function longbridgeProxyCategories(config: WebConfig, methods: Metadata['customDataMethods']) {
+  const categories = new Set<string>();
+  const methodCategory = methodCategoryMap(methods);
+  Object.entries(config.dataVendors).forEach(([category, vendor]) => {
+    if (isLongbridgeProxyVendor(vendor)) categories.add(category);
+  });
+  Object.entries(config.toolVendors ?? {}).forEach(([method, vendor]) => {
+    const category = methodCategory[method];
+    if (isLongbridgeProxyVendor(vendor) && category) categories.add(category);
+  });
+  return categories;
+}
+
+function syncLongbridgeProxyBaseUrl(config: WebConfig, baseUrl: string, methods: Metadata['customDataMethods']) {
+  const categories = longbridgeProxyCategories(config, methods);
+  if (categories.size === 0) return config;
+  const nextInterfaces = { ...config.customDataInterfaces };
+  categories.forEach((category) => {
+    const current = nextInterfaces[category] ?? { baseUrl: null, endpoints: {} };
+    nextInterfaces[category] = { ...current, baseUrl: baseUrl.trim() || null };
+  });
+  return { ...config, customDataInterfaces: nextInterfaces };
+}
+
+function hydrateLongbridgeProxyConfig(config: WebConfig, baseUrl: string, methods: Metadata['customDataMethods']) {
+  const normalizedProxyBase = normalizedBaseUrl(baseUrl);
+  const nextDataVendors = { ...config.dataVendors };
+  const nextToolVendors = { ...(config.toolVendors ?? {}) };
+  const methodCategories = methodCategoryMap(methods);
+
+  Object.entries(nextDataVendors).forEach(([category, vendor]) => {
+    const categoryBase = normalizedBaseUrl(config.customDataInterfaces[category]?.baseUrl);
+    if (isLongbridgeProxyVendor(vendor) || (vendor === 'custom' && normalizedProxyBase && categoryBase === normalizedProxyBase)) {
+      nextDataVendors[category] = LONGBRIDGE_PROXY_VENDOR;
+    }
+  });
+
+  Object.entries(nextToolVendors).forEach(([method, vendor]) => {
+    const category = methodCategories[method];
+    const categoryBase = normalizedBaseUrl(category ? config.customDataInterfaces[category]?.baseUrl : null);
+    if (isLongbridgeProxyVendor(vendor) || (vendor === 'custom' && normalizedProxyBase && categoryBase === normalizedProxyBase)) {
+      nextToolVendors[method] = LONGBRIDGE_PROXY_VENDOR;
+    }
+  });
+
+  return syncLongbridgeProxyBaseUrl(
+    { ...config, dataVendors: nextDataVendors, toolVendors: nextToolVendors },
+    baseUrl,
+    methods,
+  );
+}
+
+function configForBackend(config: WebConfig, baseUrl: string, methods: Metadata['customDataMethods']) {
+  const prepared = syncLongbridgeProxyBaseUrl(config, baseUrl, methods);
+  const dataVendors = Object.fromEntries(
+    Object.entries(prepared.dataVendors).map(([category, vendor]) => [category, isLongbridgeProxyVendor(vendor) ? 'custom' : vendor]),
+  );
+  const toolVendors = Object.fromEntries(
+    Object.entries(prepared.toolVendors ?? {}).map(([method, vendor]) => [method, isLongbridgeProxyVendor(vendor) ? 'custom' : vendor]),
+  );
+
+  return { ...prepared, dataVendors, toolVendors };
+}
+
 function buildSetupRecommendations(
   config: WebConfig,
   metadata: Metadata,
   secretStatus: SecretStatus,
   provider: Metadata['providers'][number] | undefined,
   locale: Locale,
+  longbridgeProxyBaseUrl: string,
 ) {
   const items: string[] = [];
   const toolVendors = config.toolVendors ?? {};
@@ -2795,18 +2928,32 @@ function buildSetupRecommendations(
   }
 
   const customCategories = new Set<string>();
+  const longbridgeCategories = longbridgeProxyCategories(config, metadata.customDataMethods);
   Object.entries(config.dataVendors).forEach(([category, vendor]) => {
-    if (vendor === 'custom') customCategories.add(category);
+    if (isCustomLikeDataVendor(vendor)) customCategories.add(category);
   });
   Object.entries(toolVendors).forEach(([method, vendor]) => {
-    if (vendor === 'custom' && methodCategory[method]) customCategories.add(methodCategory[method]);
+    if (isCustomLikeDataVendor(vendor) && methodCategory[method]) customCategories.add(methodCategory[method]);
   });
 
-  if (customCategories.size > 0 && !secretStatus.CUSTOM_DATA_API_KEY?.configured) {
+  const directCustomCategories = new Set<string>();
+  Object.entries(config.dataVendors).forEach(([category, vendor]) => {
+    if (vendor === 'custom') directCustomCategories.add(category);
+  });
+  Object.entries(toolVendors).forEach(([method, vendor]) => {
+    if (vendor === 'custom' && methodCategory[method]) directCustomCategories.add(methodCategory[method]);
+  });
+
+  if (directCustomCategories.size > 0 && !secretStatus.CUSTOM_DATA_API_KEY?.configured) {
     items.push(locale === 'zh' ? '已启用 custom 数据接口，建议配置 CUSTOM_DATA_API_KEY 保护自定义数据服务。' : 'Custom data routes are enabled; configure CUSTOM_DATA_API_KEY to protect the custom data service.');
   }
 
-  const missingCustomBase = [...customCategories].filter((category) => !config.customDataInterfaces[category]?.baseUrl);
+  if (longbridgeCategories.size > 0 && !longbridgeProxyBaseUrl.trim()) {
+    const names = [...longbridgeCategories].map((category) => dataVendorLabels[locale][category] ?? category).join(', ');
+    items.push(locale === 'zh' ? `已选择长桥只读代理，但 Longbridge Proxy Base URL 为空：${names}。` : `Longbridge read-only proxy is selected, but Longbridge Proxy Base URL is empty for: ${names}.`);
+  }
+
+  const missingCustomBase = [...customCategories].filter((category) => !longbridgeCategories.has(category) && !config.customDataInterfaces[category]?.baseUrl);
   if (missingCustomBase.length > 0) {
     const names = missingCustomBase.map((category) => dataVendorLabels[locale][category] ?? category).join(', ');
     items.push(locale === 'zh' ? `这些 custom 数据分类还缺少 Base URL：${names}。` : `Custom data Base URL is missing for: ${names}.`);
