@@ -45,6 +45,7 @@ export type LLMRouteConfig = {
 
 export type MarketProfileConfig = {
   region: string;
+  appendRegionSuffix: boolean;
   weight: string;
   marketProfile: string;
 };

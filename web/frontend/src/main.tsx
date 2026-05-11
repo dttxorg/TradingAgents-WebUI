@@ -88,6 +88,7 @@ const messages = {
     stockMarket: 'Stock market',
     marketSettings: 'Market profiles',
     marketRegion: 'Region suffix',
+    appendRegionSuffix: 'Append suffix',
     marketWeight: 'Market weight',
     marketPrompt: 'Market profile prompt',
     effectiveTicker: 'Runtime symbol',
@@ -278,6 +279,7 @@ const messages = {
     stockMarket: '股票市场',
     marketSettings: '市场配置',
     marketRegion: 'Region 后缀',
+    appendRegionSuffix: '自动追加后缀',
     marketWeight: '市场权重',
     marketPrompt: 'Market profile Prompt',
     effectiveTicker: '实际调用代码',
@@ -905,7 +907,7 @@ function App() {
 
   function updateMarketProfile(market: string, patch: Partial<WebConfig['marketProfiles'][string]>) {
     if (!config) return;
-    const current = config.marketProfiles?.[market] ?? { region: '', weight: '1', marketProfile: '' };
+    const current = config.marketProfiles?.[market] ?? { region: '', appendRegionSuffix: true, weight: '1', marketProfile: '' };
     updateConfig('marketProfiles', {
       ...(config.marketProfiles ?? {}),
       [market]: { ...current, ...patch },
@@ -1411,12 +1413,12 @@ function App() {
             <Panel title={t.marketSettings} icon={<BarChart3 size={17} />}>
               <p className="hint">
                 {locale === 'zh'
-                  ? '用户只输入裸代码；运行前会按所选市场自动拼接 .region，并把 market_profile prompt 注入到智能体上下文。'
-                  : 'Users enter bare symbols; before execution the backend appends .region for the selected market and injects a market_profile prompt into the agent context.'}
+                  ? '用户可以只输入裸代码；每个市场可单独决定是否自动拼接 .region。无论是否拼后缀，market_profile prompt 都会注入到智能体上下文。'
+                  : 'Users can enter bare symbols; each market controls whether .region is appended. The market_profile prompt is injected either way.'}
               </p>
               <div className="market-profile-grid">
                 {metadata.stockMarkets.map((market) => {
-                  const profile = config.marketProfiles?.[market.key] ?? { region: '', weight: '1', marketProfile: '' };
+                  const profile = config.marketProfiles?.[market.key] ?? { region: '', appendRegionSuffix: true, weight: '1', marketProfile: '' };
                   return (
                     <section key={market.key} className={config.stockMarket === market.key ? 'market-profile-card active' : 'market-profile-card'}>
                       <div className="route-card-head">
@@ -1425,6 +1427,14 @@ function App() {
                           <small>{market.description}</small>
                         </div>
                       </div>
+                      <label className="toggle-row compact-toggle">
+                        <input
+                          type="checkbox"
+                          checked={profile.appendRegionSuffix ?? true}
+                          onChange={(event) => updateMarketProfile(market.key, { appendRegionSuffix: event.target.checked })}
+                        />
+                        <span>{t.appendRegionSuffix}</span>
+                      </label>
                       <div className="market-profile-fields">
                         <label className="field">
                           <span>{t.marketRegion}</span>
@@ -2793,8 +2803,9 @@ function parseTickerList(value: string) {
   return tickers.slice(0, 50);
 }
 
-function formatMarketTicker(ticker: string, profile?: { region?: string | null }) {
+function formatMarketTicker(ticker: string, profile?: { region?: string | null; appendRegionSuffix?: boolean | null }) {
   const symbol = ticker.trim().replace(/\s+/g, '').toUpperCase();
+  if (profile?.appendRegionSuffix === false) return symbol;
   const region = profile?.region?.trim().replace(/^\.+/, '') ?? '';
   if (!symbol || !region || symbol.includes('.')) return symbol;
   return `${symbol}.${region}`;

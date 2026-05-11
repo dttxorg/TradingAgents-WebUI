@@ -59,12 +59,12 @@ STOCK_MARKETS = [
     {
         "key": "us",
         "label": "US stocks",
-        "description": "US-listed equities and ETFs. Bare symbols are wrapped with the configured region suffix, defaulting to us.",
+        "description": "US-listed equities and ETFs. Bare symbols can be wrapped with the configured region suffix, defaulting to us.",
     },
     {
         "key": "hk",
         "label": "Hong Kong stocks",
-        "description": "Hong Kong listed equities. Bare numeric tickers are wrapped with the configured region suffix.",
+        "description": "Hong Kong listed equities. Bare numeric tickers can be wrapped with the configured region suffix.",
     },
     {
         "key": "sh",
@@ -81,21 +81,25 @@ STOCK_MARKETS = [
 DEFAULT_MARKET_PROFILES = {
     "us": {
         "region": "us",
+        "appendRegionSuffix": True,
         "weight": "1",
         "marketProfile": "US equities / ETFs. Emphasize USD pricing, US exchange hours, SEC filings, Fed policy, sector rotation, and US macro context.",
     },
     "hk": {
         "region": "HK",
+        "appendRegionSuffix": True,
         "weight": "1.15",
         "marketProfile": "HK market profile. Emphasize HKD pricing, Hong Kong exchange calendar, mainland China linkage, southbound flow, H-share/ADR dual listings, and local regulatory context.",
     },
     "sh": {
         "region": "SS",
+        "appendRegionSuffix": True,
         "weight": "1.2",
         "marketProfile": "CN-A Shanghai market profile. Emphasize RMB pricing, SSE market structure, daily price limits, northbound/southbound flow, policy sensitivity, and mainland macro/liquidity context.",
     },
     "sz": {
         "region": "SZ",
+        "appendRegionSuffix": True,
         "weight": "1.2",
         "marketProfile": "CN-A Shenzhen market profile. Emphasize RMB pricing, SZSE/Growth Enterprise characteristics, daily price limits, policy sensitivity, and mainland liquidity/risk appetite.",
     },

@@ -18,8 +18,9 @@ instead of being hard-coded in the React app.
   provider/model/base URL, output language, checkpointing, and data vendors
 - Stock market profiles for US, Hong Kong, Shanghai, and Shenzhen. Users can
   enter bare symbols while administrators configure the region suffix, market
-  weight, and market-profile prompt wrapper for each market. US defaults to
-  `.us`.
+  suffix append switch, market weight, and market-profile prompt wrapper for
+  each market. US defaults to `.us`, but suffix appending can be disabled for
+  data sources that require bare symbols.
 - Secret entry with masked status only; API keys are not returned to the browser
 - Queued single-run execution with Server-Sent Events for live progress
 - Active run recovery after browser refresh, plus stop/cancel controls for
@@ -142,10 +143,12 @@ The market settings let administrators define how bare symbols are wrapped
 before execution. For example, the default US profile turns `SPY` into `SPY.us`;
 a Hong Kong profile with region `hk` turns `0700` into `0700.hk`; Shanghai can
 use `ss` or `sh`, and Shenzhen can use `sz`.
-The region value should be entered without a dot. Before the TradingAgents graph
-runs, the backend injects a `market_profile` system message such as HK or CN-A
-with the configured regional weight and market notes, so the analysis can adapt
-to exchange conventions without changing upstream strategy code.
+The region value should be entered without a dot. If a data source only supports
+bare symbols, disable `Append suffix` for that market; the market-profile prompt
+will still be injected. Before the TradingAgents graph runs, the backend injects
+a `market_profile` system message such as HK or CN-A with the configured
+regional weight and market notes, so the analysis can adapt to exchange
+conventions without changing upstream strategy code.
 
 To use an OpenAI-compatible gateway, select `Custom OpenAI-compatible` in the
 settings, enter the gateway Base URL, set the quick/deep model IDs, and save
@@ -222,8 +225,8 @@ TradingAgents-WebUI 是一个面向
 - 可视化配置股票代码、分析日期、分析师团队、研究深度、LLM 供应商/模型/API
   地址、报告输出语言、断点续跑和数据源
 - 支持美股、港股、上证、深证市场配置。用户只输入裸代码，管理员可为每个市场
-  配置 region 后缀、市场权重和 market_profile prompt wrapper；美股默认追加
-  `.us`
+  配置 region 后缀、是否自动追加后缀、市场权重和 market_profile prompt wrapper；
+  美股默认追加 `.us`，但可关闭以适配只支持裸代码的数据源
 - API Key 只支持写入和掩码状态展示，不会向浏览器返回明文密钥
 - 单任务队列执行，并通过 Server-Sent Events 实时展示运行进度
 - 浏览器刷新后可恢复正在排队/运行中的工作流，并支持停止排队或运行中的分析
@@ -327,9 +330,9 @@ OpenAI-compatible 供应商会调用 `GET {baseUrl}/models`；Google 和 Anthrop
 市场配置支持在调用前自动包装股票代码。默认美股 profile 会把 `SPY` 包装成
 `SPY.us`；港股 profile 的 region 填 `hk` 时，用户输入 `0700` 会在后端实际调用前
 变成 `0700.hk`；上证可以填 `ss` 或 `sh`，深证可以填 `sz`，region 不需要写点号。
-后端还会在 TradingAgents 图运行前注入
+如果某个数据源只支持裸代码，可以关闭该市场的“自动追加后缀”；关闭后依然会注入
 `market_profile` 系统消息，例如 HK 或 CN-A，并带上管理员配置的市场权重和市场说明，
-让分析适配交易所、币种、交易时段、监管和数据源后缀，而不用改上游策略框架。
+让分析适配交易所、币种、交易时段和监管，而不用改上游策略框架。
 
 如果要使用 OpenAI-compatible 网关，在设置里选择 `Custom OpenAI-compatible`，
 填写网关 Base URL、快速/深度模型 ID，并在 API Key 面板保存

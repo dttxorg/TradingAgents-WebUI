@@ -61,15 +61,25 @@ def test_web_config_normalizes_ticker_and_rejects_future_date():
 def test_market_profiles_format_bare_tickers_and_prompt_context():
     us_config = WebConfig(ticker="SPY")
     assert us_config.market_profiles["us"].region == "us"
+    assert us_config.market_profiles["us"].append_region_suffix is True
     assert format_market_ticker("SPY", us_config) == "SPY.us"
     assert format_market_ticker("SPY.US", us_config) == "SPY.US"
 
-    old_us_config = WebConfig(
+    no_suffix_config = WebConfig(
         ticker="SPY",
-        marketProfiles={"us": {"region": "", "weight": "1", "marketProfile": "Legacy US profile."}},
+        marketProfiles={"us": {"region": "us", "appendRegionSuffix": False, "weight": "1", "marketProfile": "No-suffix US profile."}},
     )
-    assert old_us_config.market_profiles["us"].region == "us"
-    assert format_market_ticker("SPY", old_us_config) == "SPY.us"
+    assert no_suffix_config.market_profiles["us"].region == "us"
+    assert no_suffix_config.market_profiles["us"].append_region_suffix is False
+    assert format_market_ticker("SPY", no_suffix_config) == "SPY"
+    assert "Region suffix append mode: disabled" in market_profile_prompt("SPY", "SPY", no_suffix_config)
+
+    blank_region_config = WebConfig(
+        ticker="SPY",
+        marketProfiles={"us": {"region": "", "weight": "1", "marketProfile": "Blank suffix US profile."}},
+    )
+    assert blank_region_config.market_profiles["us"].region == ""
+    assert format_market_ticker("SPY", blank_region_config) == "SPY"
 
     config = WebConfig(
         ticker="0700",
@@ -365,6 +375,7 @@ def test_backtest_custom_price_api_is_dedicated_and_checkpointed(monkeypatch, tm
     monkeypatch.setattr(requests, "post", fake_post)
 
     record = BacktestEngine(storage).run_report(storage.load_report_history(run.id))  # type: ignore[arg-type]
+    expected_end = min(date.today(), date(2026, 5, 1) + timedelta(days=config.review_window_days))
 
     assert record.status == "completed"
     assert record.result.outcome == "target_hit"
@@ -377,7 +388,7 @@ def test_backtest_custom_price_api_is_dedicated_and_checkpointed(monkeypatch, tm
             "json": {
                 "ticker": "SPY",
                 "start": "2026-05-01",
-                "end": str(date.today()),
+                "end": str(expected_end),
                 "interval": "1d",
                 "purpose": "backtest_observation",
             },

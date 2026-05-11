@@ -128,6 +128,7 @@ class LLMRouteConfig(APIModel):
 
 class MarketProfileConfig(APIModel):
     region: str = ""
+    append_region_suffix: bool = True
     weight: Decimal = Decimal("1")
     market_profile: str = ""
 
@@ -312,8 +313,6 @@ class WebConfig(APIModel):
             if market not in STOCK_MARKET_KEYS:
                 raise ValueError(f"Unsupported market profile: {key}")
             profiles[market] = profile
-        if profiles["us"].region == "":
-            profiles["us"] = profiles["us"].model_copy(update={"region": "us"})
         return profiles
 
     @model_validator(mode="after")
