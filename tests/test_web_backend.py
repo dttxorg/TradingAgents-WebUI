@@ -14,6 +14,7 @@ from web.backend.app import app
 from web.backend.backtesting import BacktestEngine
 from web.backend.constants import CUSTOM_DATA_VENDOR, CUSTOM_OPENAI_PROVIDER, metadata_payload
 from web.backend.custom_data import configure_custom_data_interfaces
+from web.backend.llm_options import apply_deepseek_thinking_kwargs, patched_tradingagents_llm_client_factory
 from web.backend.markets import format_market_ticker, market_profile_prompt
 from web.backend.model_discovery import fetch_provider_models
 from web.backend.runner import RunManager
@@ -37,6 +38,7 @@ def test_metadata_exposes_configurable_catalogs():
     assert any(provider["value"] == CUSTOM_OPENAI_PROVIDER for provider in payload["providers"])
     assert any(provider["value"] == "moonshot" and provider["apiKeyField"] == "MOONSHOT_API_KEY" for provider in payload["providers"])
     assert any(language["value"] == "Chinese" for language in payload["languages"])
+    assert any(option["value"] == "disabled" for option in payload["deepseekThinkingModes"])
     assert any(market["key"] == "hk" for market in payload["stockMarkets"])
     assert "openai" in payload["models"]
     assert CUSTOM_OPENAI_PROVIDER in payload["models"]
@@ -411,6 +413,82 @@ def test_custom_openai_requires_base_url_and_accepts_model_ids():
     assert config.backend_url == "https://llm.example.com/v1"
     assert config.quick_think_llm == "custom-fast"
     assert config.deep_think_llm == "custom-deep"
+
+
+def test_deepseek_thinking_mode_defaults_persists_and_runtime_config(tmp_path):
+    legacy = WebConfig.model_validate({"ticker": "SPY", "analysisDate": str(date.today())})
+    assert legacy.deepseek_thinking_mode == "disabled"
+
+    config = WebConfig(
+        llmProvider=CUSTOM_OPENAI_PROVIDER,
+        backendUrl="https://llm.example.com/v1",
+        quickThinkLlm="deepseek-v4-flash",
+        deepThinkLlm="deepseek-v4-pro",
+        deepseekThinkingMode="disabled",
+    )
+    storage = WebStorage(tmp_path)
+    storage.save_config(config)
+    loaded = storage.load_config()
+    runtime_config = storage.runtime_config(loaded)
+
+    assert loaded.deepseek_thinking_mode == "disabled"
+    assert runtime_config["deepseek_thinking_mode"] == "disabled"
+    assert loaded.model_dump(mode="json", by_alias=True)["deepseekThinkingMode"] == "disabled"
+
+
+def test_deepseek_thinking_kwargs_are_only_added_for_deepseek_targets():
+    from tradingagents.llm_clients import openai_client
+
+    config = {"deepseek_thinking_mode": "disabled"}
+
+    patched = apply_deepseek_thinking_kwargs(
+        config,
+        provider="openrouter",
+        model="deepseek-v4-flash",
+        base_url="https://gateway.example.com/v1",
+        kwargs={"timeout": 30},
+    )
+    assert patched["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert patched["timeout"] == 30
+    assert "extra_body" in openai_client._PASSTHROUGH_KWARGS
+
+    regular = apply_deepseek_thinking_kwargs(
+        config,
+        provider="openrouter",
+        model="qwen-max",
+        base_url="https://gateway.example.com/v1",
+        kwargs={},
+    )
+    assert "extra_body" not in regular
+
+    default_mode = apply_deepseek_thinking_kwargs(
+        {"deepseek_thinking_mode": "default"},
+        provider="deepseek",
+        model="deepseek-chat",
+        base_url="https://api.deepseek.com",
+        kwargs={},
+    )
+    assert "extra_body" not in default_mode
+
+
+def test_tradingagents_factory_wrapper_injects_deepseek_thinking(monkeypatch):
+    from tradingagents.graph import trading_graph as trading_graph_module
+
+    captured = {}
+
+    def fake_create_llm_client(provider, model, base_url=None, **kwargs):
+        captured.update({"provider": provider, "model": model, "base_url": base_url, "kwargs": kwargs})
+        return object()
+
+    monkeypatch.setattr(trading_graph_module, "create_llm_client", fake_create_llm_client)
+    with patched_tradingagents_llm_client_factory({"deepseek_thinking_mode": "disabled"}):
+        trading_graph_module.create_llm_client(
+            provider="openrouter",
+            model="deepseek-v4-pro",
+            base_url="https://gateway.example.com/v1",
+        )
+
+    assert captured["kwargs"]["extra_body"] == {"thinking": {"type": "disabled"}}
 
 
 def test_custom_data_interfaces_validate_selected_categories():

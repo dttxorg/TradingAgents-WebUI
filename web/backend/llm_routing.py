@@ -28,6 +28,7 @@ from .constants import (
     provider_secret_field,
     uses_openai_compatible_adapter,
 )
+from .llm_options import apply_deepseek_thinking_kwargs
 from .schemas import LLMRouteConfig
 
 
@@ -188,6 +189,7 @@ class LLMRouter:
                 f"{ROUTE_META[route_key]['label']} LLM route."
             )
 
+        kwargs = apply_deepseek_thinking_kwargs(self.config, client_provider, model, base_url, kwargs)
         client = create_llm_client(provider=client_provider, model=model, base_url=base_url, **kwargs)
         return client.get_llm()
 

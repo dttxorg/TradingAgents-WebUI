@@ -37,6 +37,24 @@ OUTPUT_LANGUAGES = [
     {"label": "Russian (Русский)", "value": "Russian"},
 ]
 
+DEEPSEEK_THINKING_MODE_OPTIONS = [
+    {
+        "label": "Disabled (recommended for tool calling)",
+        "value": "disabled",
+        "description": "Send thinking.type=disabled for DeepSeek OpenAI-compatible chat completions.",
+    },
+    {
+        "label": "Default",
+        "value": "default",
+        "description": "Do not send a DeepSeek thinking parameter.",
+    },
+    {
+        "label": "Enabled",
+        "value": "enabled",
+        "description": "Send thinking.type=enabled. Tool-calling clients must replay reasoning_content.",
+    },
+]
+
 RESEARCH_DEPTHS = [
     {
         "label": "Shallow",
@@ -541,6 +559,7 @@ def metadata_payload() -> dict[str, Any]:
         "providers": PROVIDERS,
         "models": model_options(),
         "languages": OUTPUT_LANGUAGES,
+        "deepseekThinkingModes": DEEPSEEK_THINKING_MODE_OPTIONS,
         "dataVendorCategories": DATA_VENDOR_CATEGORIES,
         "customDataMethods": CUSTOM_DATA_METHODS,
         "llmRouteTargets": LLM_ROUTE_TARGETS,

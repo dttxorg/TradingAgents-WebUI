@@ -111,6 +111,8 @@ const messages = {
     openaiReasoning: 'OpenAI reasoning',
     geminiThinking: 'Gemini thinking',
     anthropicEffort: 'Anthropic effort',
+    deepseekThinkingMode: 'DeepSeek Thinking Mode',
+    deepseekThinkingHint: 'Disabled is recommended for TradingAgents tool-calling workflows. Enabled requires clients to replay reasoning_content during tool calls and may fail with OpenAI-compatible agent frameworks.',
     checkpointResume: 'Checkpoint resume',
     parallelRuns: 'Single-run workers',
     saveDefaults: 'Save defaults',
@@ -302,6 +304,8 @@ const messages = {
     openaiReasoning: 'OpenAI 推理强度',
     geminiThinking: 'Gemini 思考模式',
     anthropicEffort: 'Anthropic Effort',
+    deepseekThinkingMode: 'DeepSeek Thinking Mode',
+    deepseekThinkingHint: '建议在 TradingAgents 工具调用工作流中选择 Disabled，避免 DeepSeek reasoning_content 回传错误。Enabled 需要客户端在工具调用期间回传 reasoning_content，OpenAI-compatible agent 框架可能失败。',
     checkpointResume: '启用断点续跑',
     parallelRuns: '单股票任务 worker 数',
     saveDefaults: '保存默认配置',
@@ -542,6 +546,7 @@ const emptyMetadata: Metadata = {
   providers: [],
   models: {},
   languages: [],
+  deepseekThinkingModes: [],
   dataVendorCategories: [],
   customDataMethods: [],
   llmRouteTargets: [],
@@ -824,6 +829,7 @@ function App() {
   const providerModels = config ? mergedProviderModels(config.llmProvider) : undefined;
   const isCustomOpenAi = config?.llmProvider === 'custom_openai';
   const customNeedsManualModel = isCustomOpenAi && !discoveredModels[config?.llmProvider ?? '']?.length;
+  const showDeepSeekThinkingMode = Boolean(config && (isCustomOpenAi || isDeepSeekConfig(config, provider)));
   const outputLocale = outputLanguageLocale(config?.outputLanguage ?? 'English');
   const setupRecommendations = useMemo(
     () => (config ? buildSetupRecommendations(config, metadata, secretStatus, provider, locale, longbridgeProxyBaseUrl) : []),
@@ -1374,6 +1380,24 @@ function App() {
               {provider?.modelFetch === 'none' && <p className="hint">{t.modelFetchUnavailable}</p>}
               {discoveredModels[config.llmProvider]?.length > 0 && (
                 <p className="hint">{discoveredModels[config.llmProvider].length} {t.fetchedModels}</p>
+              )}
+              {showDeepSeekThinkingMode && (
+                <div className="form-grid settings-form">
+                  <label className="field">
+                    <span>{t.deepseekThinkingMode}</span>
+                    <select
+                      value={config.deepseekThinkingMode ?? 'disabled'}
+                      onChange={(event) => updateConfig('deepseekThinkingMode', event.target.value as WebConfig['deepseekThinkingMode'])}
+                    >
+                      {deepseekThinkingOptions(metadata, locale).map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p className="hint">{t.deepseekThinkingHint}</p>
+                </div>
               )}
 
               <div className="section-title">
@@ -2849,6 +2873,51 @@ function dataVendorOptionLabel(option: string, locale: Locale) {
   return option;
 }
 
+function isDeepSeekConfig(config: WebConfig, provider?: Metadata['providers'][number]) {
+  const values = [
+    config.llmProvider,
+    provider?.label ?? '',
+    config.backendUrl ?? '',
+    config.quickThinkLlm,
+    config.deepThinkLlm,
+    ...Object.values(config.llmRoutes ?? {}).flatMap((route) => [
+      route.provider ?? '',
+      route.backendUrl ?? '',
+      route.modelId ?? '',
+    ]),
+  ];
+  return values.some((value) => value.toLowerCase().includes('deepseek'));
+}
+
+function deepseekThinkingOptions(metadata: Metadata, locale: Locale) {
+  if (metadata.deepseekThinkingModes.length > 0) {
+    return metadata.deepseekThinkingModes.map((option) => ({
+      value: option.value,
+      label: locale === 'zh' ? deepseekThinkingLabel(option.value, locale) : option.label,
+    }));
+  }
+  return (['disabled', 'default', 'enabled'] as const).map((value) => ({
+    value,
+    label: deepseekThinkingLabel(value, locale),
+  }));
+}
+
+function deepseekThinkingLabel(value: 'default' | 'enabled' | 'disabled', locale: Locale) {
+  const labels = {
+    en: {
+      default: 'Default',
+      enabled: 'Enabled',
+      disabled: 'Disabled',
+    },
+    zh: {
+      default: 'Default',
+      enabled: 'Enabled',
+      disabled: 'Disabled',
+    },
+  };
+  return labels[locale][value];
+}
+
 function methodCategoryMap(methods: Metadata['customDataMethods']) {
   return Object.fromEntries(methods.map((method) => [method.method, method.category]));
 }
@@ -2936,6 +3005,12 @@ function buildSetupRecommendations(
 
   if (selectedVendors.includes('alpha_vantage') && !secretStatus.ALPHA_VANTAGE_API_KEY?.configured) {
     items.push(locale === 'zh' ? '已选择 Alpha Vantage 数据源，需要配置 ALPHA_VANTAGE_API_KEY。' : 'Alpha Vantage is selected for data, so ALPHA_VANTAGE_API_KEY is required.');
+  }
+
+  if (isDeepSeekConfig(config, provider) && config.deepseekThinkingMode !== 'disabled') {
+    items.push(locale === 'zh'
+      ? 'DeepSeek 工具调用工作流建议将 Thinking Mode 设为 Disabled，避免 reasoning_content 回传错误。'
+      : 'DeepSeek tool-calling workflows should use Thinking Mode = Disabled to avoid reasoning_content replay errors.');
   }
 
   const customCategories = new Set<string>();

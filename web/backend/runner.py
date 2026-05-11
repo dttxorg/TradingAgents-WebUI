@@ -29,6 +29,7 @@ from .constants import (
     uses_openai_compatible_adapter,
 )
 from .custom_data import configure_custom_data_interfaces
+from .llm_options import patched_tradingagents_llm_client_factory
 from .llm_routing import has_enabled_llm_routes, routed_workflow
 from .markets import apply_market_profile, format_market_ticker, market_profile_prompt
 from .schemas import BatchRunRequest, RunBilling, RunInfo, RunReports, RunRequest, UserPublic, WebConfig
@@ -346,21 +347,22 @@ class RunManager:
             message_buffer = MessageBuffer()
             message_buffer.init_for_analysis(selected_analysts)
 
-            graph = TradingAgentsGraph(
-                selected_analysts,
-                config=runtime_config,
-                debug=False,
-                callbacks=[stats_handler, event_handler],
-            )
-            if has_enabled_llm_routes(runtime_config):
-                graph.workflow = routed_workflow(
-                    graph,
+            with patched_tradingagents_llm_client_factory(runtime_config):
+                graph = TradingAgentsGraph(
                     selected_analysts,
-                    runtime_config,
-                    secrets,
-                    [stats_handler, event_handler],
+                    config=runtime_config,
+                    debug=False,
+                    callbacks=[stats_handler, event_handler],
                 )
-                graph.graph = graph.workflow.compile()
+                if has_enabled_llm_routes(runtime_config):
+                    graph.workflow = routed_workflow(
+                        graph,
+                        selected_analysts,
+                        runtime_config,
+                        secrets,
+                        [stats_handler, event_handler],
+                    )
+                    graph.graph = graph.workflow.compile()
             run.emit("status", {"status": "running", "message": localized_event_message(run.config.output_language, "resolving_memory")})
             graph._resolve_pending_entries(run.request.ticker)
 
@@ -392,6 +394,7 @@ class RunManager:
                     "provider": run.config.llm_provider,
                     "runtimeProvider": runtime_config.get("llm_provider"),
                     "backendUrl": runtime_config.get("backend_url"),
+                    "deepseekThinkingMode": runtime_config.get("deepseek_thinking_mode"),
                     "stockMarket": run.config.stock_market,
                     "inputTicker": run.raw_ticker or run.config.ticker,
                     "marketProfile": runtime_config.get("market_profiles", {}).get(run.config.stock_market, {}),

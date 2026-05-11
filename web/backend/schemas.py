@@ -10,6 +10,7 @@ from cli.utils import normalize_ticker_symbol
 from tradingagents.default_config import DEFAULT_CONFIG
 
 from .constants import CUSTOM_DATA_METHODS, CUSTOM_DATA_VENDOR, CUSTOM_OPENAI_PROVIDER, DATA_VENDOR_CATEGORIES, DEFAULT_MARKET_PROFILES, LLM_ROUTE_TARGETS, PROVIDERS, STOCK_MARKETS, analyst_options
+from .llm_options import DEEPSEEK_THINKING_DEFAULT
 
 
 def to_camel(value: str) -> str:
@@ -175,6 +176,7 @@ class WebConfig(APIModel):
     google_thinking_level: str | None = DEFAULT_CONFIG.get("google_thinking_level")
     openai_reasoning_effort: str | None = DEFAULT_CONFIG.get("openai_reasoning_effort")
     anthropic_effort: str | None = DEFAULT_CONFIG.get("anthropic_effort")
+    deepseek_thinking_mode: Literal["default", "enabled", "disabled"] = DEEPSEEK_THINKING_DEFAULT
     checkpoint_enabled: bool = DEFAULT_CONFIG["checkpoint_enabled"]
     max_recur_limit: int = DEFAULT_CONFIG["max_recur_limit"]
     max_parallel_runs: int = 1

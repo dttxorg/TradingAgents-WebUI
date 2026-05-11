@@ -155,6 +155,22 @@ settings, enter the gateway Base URL, set the quick/deep model IDs, and save
 `CUSTOM_OPENAI_API_KEY` in the API key panel. This works for gateways that
 implement the OpenAI Chat Completions API.
 
+For DeepSeek V4 or other DeepSeek thinking models used through
+OpenAI-compatible Chat Completions, set `DeepSeek Thinking Mode` to `Disabled`
+for TradingAgents tool-calling workflows. DeepSeek thinking mode may return
+`reasoning_content`, and tool-calling follow-up requests must replay that field.
+Most OpenAI-compatible agent frameworks keep `content` and `tool_calls` but do
+not preserve provider-private `reasoning_content`, which can cause a 400 error.
+When disabled, WebUI sends:
+
+```json
+{
+  "thinking": {
+    "type": "disabled"
+  }
+}
+```
+
 To use a custom data service, choose `custom` for one or more data vendor
 categories, or override a specific backend data method such as `get_news` or
 `get_global_news`, then set that category's Base URL and endpoint paths. The
@@ -337,6 +353,21 @@ OpenAI-compatible 供应商会调用 `GET {baseUrl}/models`；Google 和 Anthrop
 如果要使用 OpenAI-compatible 网关，在设置里选择 `Custom OpenAI-compatible`，
 填写网关 Base URL、快速/深度模型 ID，并在 API Key 面板保存
 `CUSTOM_OPENAI_API_KEY`。该模式适用于实现 OpenAI Chat Completions API 的服务。
+
+通过 OpenAI-compatible Chat Completions 使用 DeepSeek V4 或其他 DeepSeek
+thinking 模型时，建议在 TradingAgents 工具调用工作流中把 `DeepSeek Thinking
+Mode` 设为 `Disabled`。DeepSeek thinking mode 可能返回 `reasoning_content`，
+并要求后续工具调用请求原样回传该字段；多数 OpenAI-compatible agent 框架只保留
+`content` 和 `tool_calls`，不会保留供应商私有的 `reasoning_content`，因此可能触发
+400 错误。关闭后，WebUI 会发送：
+
+```json
+{
+  "thinking": {
+    "type": "disabled"
+  }
+}
+```
 
 如果要使用自定义数据服务，将某个数据分类的数据源选择为 `custom`，或单独覆盖
 `get_news`、`get_global_news` 等后端数据方法，然后为该分类填写 Base URL 和

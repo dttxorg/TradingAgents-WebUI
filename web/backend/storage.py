@@ -690,6 +690,7 @@ class WebStorage:
         config["google_thinking_level"] = web_config.google_thinking_level
         config["openai_reasoning_effort"] = web_config.openai_reasoning_effort
         config["anthropic_effort"] = web_config.anthropic_effort
+        config["deepseek_thinking_mode"] = web_config.deepseek_thinking_mode
         config["output_language"] = web_config.output_language
         config["checkpoint_enabled"] = web_config.checkpoint_enabled
         config["max_recur_limit"] = web_config.max_recur_limit

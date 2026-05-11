@@ -17,6 +17,7 @@ export type Metadata = {
   providers: Option[];
   models: Record<string, Record<'quick' | 'deep', Option[]>>;
   languages: Option[];
+  deepseekThinkingModes: Option<'default' | 'enabled' | 'disabled'>[];
   dataVendorCategories: Array<{ key: string; label: string; options: string[] }>;
   customDataMethods: Array<{ method: string; category: string; label: string; defaultPath: string }>;
   llmRouteTargets: Array<{
@@ -65,6 +66,7 @@ export type WebConfig = {
   googleThinkingLevel: string | null;
   openaiReasoningEffort: string | null;
   anthropicEffort: string | null;
+  deepseekThinkingMode: 'default' | 'enabled' | 'disabled';
   checkpointEnabled: boolean;
   maxRecurLimit: number;
   maxParallelRuns: number;
