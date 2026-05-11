@@ -791,6 +791,25 @@ textarea {
   gap: 10px;
 }
 
+.advanced-data-preset {
+  border: 1px solid #25373c;
+  border-radius: 8px;
+  background: #0c1215;
+  margin: 10px 0 12px;
+  padding: 9px 10px;
+}
+
+.advanced-data-preset summary {
+  cursor: pointer;
+  color: #9eabad;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.advanced-data-preset .hint {
+  margin-top: 9px;
+}
+
 .route-grid {
   display: grid;
   gap: 10px;

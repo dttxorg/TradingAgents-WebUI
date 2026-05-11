@@ -45,11 +45,29 @@ def test_metadata_exposes_configurable_catalogs():
     assert "moonshot" in payload["models"]
     assert payload["dataVendorCategories"]
     assert all(CUSTOM_DATA_VENDOR in category["options"] for category in payload["dataVendorCategories"])
+    assert all(set(category["options"]) == {"yfinance", "alpha_vantage", CUSTOM_DATA_VENDOR} for category in payload["dataVendorCategories"])
     assert any(method["method"] == "get_news" for method in payload["customDataMethods"])
     assert "CUSTOM_OPENAI_API_KEY" in payload["secretFields"]
     assert "CUSTOM_DATA_API_KEY" in payload["secretFields"]
     assert "BACKTEST_DATA_API_KEY" in payload["secretFields"]
     assert "MOONSHOT_API_KEY" in payload["secretFields"]
+
+
+def test_backend_keeps_longbridge_as_frontend_only_data_preset():
+    config = WebConfig()
+
+    assert config.data_vendors == {
+        "core_stock_apis": "yfinance",
+        "technical_indicators": "yfinance",
+        "fundamental_data": "yfinance",
+        "news_data": "yfinance",
+    }
+
+    with pytest.raises(ValidationError):
+        WebConfig(dataVendors={"core_stock_apis": "longbridge_proxy"})
+
+    with pytest.raises(ValidationError):
+        WebConfig(toolVendors={"get_stock_data": "longbridge_proxy"})
 
 
 def test_web_config_normalizes_ticker_and_rejects_future_date():

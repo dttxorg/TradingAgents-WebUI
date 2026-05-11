@@ -49,13 +49,23 @@ import type {
   User,
   WebConfig,
 } from './types';
+import {
+  configForBackend,
+  hydrateLongbridgeProxyConfig,
+  isCustomLikeDataVendor,
+  isLongbridgeProxyBaseUrl,
+  isLongbridgeProxyVendor,
+  longbridgeProxyCategories,
+  normalizeDisplayVendor,
+  syncLongbridgeProxyBaseUrl,
+  vendorOptions,
+} from './configMapping';
 import './styles.css';
 
 type Locale = 'en' | 'zh';
 type ViewMode = 'workspace' | 'settings';
 type ImportMetaWithEnv = ImportMeta & { env?: Record<string, string | undefined> };
 
-const LONGBRIDGE_PROXY_VENDOR = 'longbridge_proxy';
 const LONGBRIDGE_PROXY_ENV =
   ((import.meta as ImportMetaWithEnv).env?.VITE_LONGBRIDGE_PROXY_URL ?? '').trim();
 
@@ -80,7 +90,7 @@ const messages = {
     replaceValue: 'Replace value',
     pasteKey: 'Paste key',
     saveSecrets: 'Save secrets',
-    dataVendors: 'Data vendors',
+    dataVendors: 'Default data vendors',
     analysisSetup: 'Analysis setup',
     ticker: 'Ticker',
     tickerList: 'Ticker list',
@@ -144,10 +154,12 @@ const messages = {
     currentReport: 'Current run',
     showCurrentRun: 'Show current run',
     archivedReport: 'Archived report',
-    customInterfaces: 'Settings / Custom APIs',
+    customInterfaces: 'Custom HTTP data interface',
     customOpenAiHint: 'OpenAI-compatible Base URL, model IDs, and CUSTOM_OPENAI_API_KEY.',
     customDataHint: 'Choose custom as a data vendor, then point that category at an HTTP service.',
-    longbridgeProxyBaseUrl: 'Longbridge Proxy Base URL',
+    longbridgeProxyBaseUrl: 'Longbridge read-only proxy (advanced preset)',
+    longbridgeProxyHint: 'Saved as custom data interface; Longbridge credentials stay on the proxy service.',
+    longbridgeProxyUrlField: 'Proxy Base URL',
     longbridgeProxyPlaceholder: 'https://longbridge-proxy.example.com',
     methodOverrides: 'Method-level data routes',
     useCategoryDefault: 'Use category default',
@@ -273,7 +285,7 @@ const messages = {
     replaceValue: '替换当前值',
     pasteKey: '粘贴密钥',
     saveSecrets: '保存密钥',
-    dataVendors: '数据源',
+    dataVendors: '默认数据源',
     analysisSetup: '分析配置',
     ticker: '股票代码',
     tickerList: '股票列表',
@@ -337,10 +349,12 @@ const messages = {
     currentReport: '当前运行',
     showCurrentRun: '查看当前运行',
     archivedReport: '历史报告',
-    customInterfaces: '设置 / 自定义接口',
+    customInterfaces: '自定义 HTTP 数据接口',
     customOpenAiHint: 'OpenAI-compatible Base URL、模型 ID 和 CUSTOM_OPENAI_API_KEY。',
     customDataHint: '将数据源选择为 custom 后，把对应分类指向你的 HTTP 数据服务。',
-    longbridgeProxyBaseUrl: 'Longbridge Proxy Base URL',
+    longbridgeProxyBaseUrl: '长桥只读代理（高级预设）',
+    longbridgeProxyHint: '选择后会按 custom 数据接口保存，不会把长桥密钥放进浏览器或 WebUI 后端。',
+    longbridgeProxyUrlField: '代理 Base URL',
     longbridgeProxyPlaceholder: 'https://longbridge-proxy.example.com',
     methodOverrides: '按后端方法单独设置数据源',
     useCategoryDefault: '使用分类默认值',
@@ -830,6 +844,8 @@ function App() {
   const isCustomOpenAi = config?.llmProvider === 'custom_openai';
   const customNeedsManualModel = isCustomOpenAi && !discoveredModels[config?.llmProvider ?? '']?.length;
   const showDeepSeekThinkingMode = Boolean(config && (isCustomOpenAi || isDeepSeekConfig(config, provider)));
+  const selectedLongbridgeCategories = config ? longbridgeProxyCategories(config, metadata.customDataMethods) : new Set<string>();
+  const hasLongbridgeProxyPreset = selectedLongbridgeCategories.size > 0;
   const outputLocale = outputLanguageLocale(config?.outputLanguage ?? 'English');
   const setupRecommendations = useMemo(
     () => (config ? buildSetupRecommendations(config, metadata, secretStatus, provider, locale, longbridgeProxyBaseUrl) : []),
@@ -1585,14 +1601,18 @@ function App() {
             <Panel title={t.customInterfaces} icon={<Server size={17} />}>
               <p className="hint">{t.customOpenAiHint}</p>
               <p className="hint">{t.customDataHint}</p>
-              <label className="field">
-                <span>{t.longbridgeProxyBaseUrl}</span>
-                <input
-                  value={longbridgeProxyBaseUrl}
-                  onChange={(event) => updateLongbridgeProxyBaseUrl(event.target.value)}
-                  placeholder={LONGBRIDGE_PROXY_ENV || t.longbridgeProxyPlaceholder}
-                />
-              </label>
+              <details className="advanced-data-preset" open={hasLongbridgeProxyPreset}>
+                <summary>{t.longbridgeProxyBaseUrl}</summary>
+                <p className="hint">{t.longbridgeProxyHint}</p>
+                <label className="field">
+                  <span>{t.longbridgeProxyUrlField}</span>
+                  <input
+                    value={longbridgeProxyBaseUrl}
+                    onChange={(event) => updateLongbridgeProxyBaseUrl(event.target.value)}
+                    placeholder={LONGBRIDGE_PROXY_ENV || t.longbridgeProxyPlaceholder}
+                  />
+                </label>
+              </details>
               <div className="custom-interface-list">
                 {metadata.dataVendorCategories.map((category) => {
                   const settings = config.customDataInterfaces[category.key] ?? { baseUrl: null, endpoints: {} };
@@ -2840,35 +2860,14 @@ function outputLanguageLocale(language: string): Locale {
   return normalized.startsWith('chinese') || normalized === '中文' || normalized.startsWith('zh') ? 'zh' : 'en';
 }
 
-function isLongbridgeProxyVendor(vendor: string | null | undefined) {
-  return vendor === LONGBRIDGE_PROXY_VENDOR || vendor === 'longbridge';
-}
-
-function isCustomLikeDataVendor(vendor: string | null | undefined) {
-  return vendor === 'custom' || isLongbridgeProxyVendor(vendor);
-}
-
-function normalizeDisplayVendor(vendor: string) {
-  return isLongbridgeProxyVendor(vendor) ? LONGBRIDGE_PROXY_VENDOR : vendor;
-}
-
-function normalizedBaseUrl(value: string | null | undefined) {
-  return (value ?? '').trim().replace(/\/+$/, '');
-}
-
-function isLongbridgeProxyBaseUrl(value: string | null | undefined, proxyBaseUrl: string | null | undefined) {
-  const normalizedValue = normalizedBaseUrl(value);
-  const normalizedProxy = normalizedBaseUrl(proxyBaseUrl);
-  return Boolean(normalizedValue && normalizedProxy && normalizedValue === normalizedProxy);
-}
-
-function vendorOptions(options: string[]) {
-  return options.includes(LONGBRIDGE_PROXY_VENDOR) ? options : [...options, LONGBRIDGE_PROXY_VENDOR];
-}
-
 function dataVendorOptionLabel(option: string, locale: Locale) {
   if (isLongbridgeProxyVendor(option)) {
-    return locale === 'zh' ? 'longbridge_proxy / 长桥只读代理' : 'longbridge_proxy / Longbridge read-only proxy';
+    return locale === 'zh'
+      ? 'longbridge_proxy / 长桥只读代理（高级预设）'
+      : 'longbridge_proxy / Longbridge read-only proxy (advanced preset)';
+  }
+  if (option === 'custom') {
+    return locale === 'zh' ? 'custom / 自定义 HTTP 数据接口' : 'custom / Custom HTTP data interface';
   }
   return option;
 }
@@ -2916,74 +2915,6 @@ function deepseekThinkingLabel(value: 'default' | 'enabled' | 'disabled', locale
     },
   };
   return labels[locale][value];
-}
-
-function methodCategoryMap(methods: Metadata['customDataMethods']) {
-  return Object.fromEntries(methods.map((method) => [method.method, method.category]));
-}
-
-function longbridgeProxyCategories(config: WebConfig, methods: Metadata['customDataMethods']) {
-  const categories = new Set<string>();
-  const methodCategory = methodCategoryMap(methods);
-  Object.entries(config.dataVendors).forEach(([category, vendor]) => {
-    if (isLongbridgeProxyVendor(vendor)) categories.add(category);
-  });
-  Object.entries(config.toolVendors ?? {}).forEach(([method, vendor]) => {
-    const category = methodCategory[method];
-    if (isLongbridgeProxyVendor(vendor) && category) categories.add(category);
-  });
-  return categories;
-}
-
-function syncLongbridgeProxyBaseUrl(config: WebConfig, baseUrl: string, methods: Metadata['customDataMethods']) {
-  const categories = longbridgeProxyCategories(config, methods);
-  if (categories.size === 0) return config;
-  const nextInterfaces = { ...config.customDataInterfaces };
-  categories.forEach((category) => {
-    const current = nextInterfaces[category] ?? { baseUrl: null, endpoints: {} };
-    nextInterfaces[category] = { ...current, baseUrl: baseUrl.trim() || null };
-  });
-  return { ...config, customDataInterfaces: nextInterfaces };
-}
-
-function hydrateLongbridgeProxyConfig(config: WebConfig, baseUrl: string, methods: Metadata['customDataMethods']) {
-  const normalizedProxyBase = normalizedBaseUrl(baseUrl);
-  const nextDataVendors = { ...config.dataVendors };
-  const nextToolVendors = { ...(config.toolVendors ?? {}) };
-  const methodCategories = methodCategoryMap(methods);
-
-  Object.entries(nextDataVendors).forEach(([category, vendor]) => {
-    const categoryBase = normalizedBaseUrl(config.customDataInterfaces[category]?.baseUrl);
-    if (isLongbridgeProxyVendor(vendor) || (vendor === 'custom' && normalizedProxyBase && categoryBase === normalizedProxyBase)) {
-      nextDataVendors[category] = LONGBRIDGE_PROXY_VENDOR;
-    }
-  });
-
-  Object.entries(nextToolVendors).forEach(([method, vendor]) => {
-    const category = methodCategories[method];
-    const categoryBase = normalizedBaseUrl(category ? config.customDataInterfaces[category]?.baseUrl : null);
-    if (isLongbridgeProxyVendor(vendor) || (vendor === 'custom' && normalizedProxyBase && categoryBase === normalizedProxyBase)) {
-      nextToolVendors[method] = LONGBRIDGE_PROXY_VENDOR;
-    }
-  });
-
-  return syncLongbridgeProxyBaseUrl(
-    { ...config, dataVendors: nextDataVendors, toolVendors: nextToolVendors },
-    baseUrl,
-    methods,
-  );
-}
-
-function configForBackend(config: WebConfig, baseUrl: string, methods: Metadata['customDataMethods']) {
-  const prepared = syncLongbridgeProxyBaseUrl(config, baseUrl, methods);
-  const dataVendors = Object.fromEntries(
-    Object.entries(prepared.dataVendors).map(([category, vendor]) => [category, isLongbridgeProxyVendor(vendor) ? 'custom' : vendor]),
-  );
-  const toolVendors = Object.fromEntries(
-    Object.entries(prepared.toolVendors ?? {}).map(([method, vendor]) => [method, isLongbridgeProxyVendor(vendor) ? 'custom' : vendor]),
-  );
-
-  return { ...prepared, dataVendors, toolVendors };
 }
 
 function buildSetupRecommendations(
