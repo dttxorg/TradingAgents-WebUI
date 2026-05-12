@@ -14,7 +14,9 @@ from typing import Any
 from langchain_core.callbacks import BaseCallbackHandler
 
 from cli.main import (
+    ANALYST_AGENT_NAMES,
     ANALYST_ORDER,
+    ANALYST_REPORT_MAP,
     MessageBuffer,
     classify_message_type,
     update_analyst_statuses,
@@ -30,7 +32,7 @@ from .constants import (
 )
 from .custom_data import configure_custom_data_interfaces
 from .llm_options import patched_tradingagents_llm_client_factory
-from .llm_routing import has_enabled_llm_routes, routed_workflow
+from .llm_routing import parallel_initial_analyst_workflow, has_enabled_llm_routes, routed_workflow
 from .markets import apply_market_profile, format_market_ticker, market_profile_prompt
 from .schemas import BatchRunRequest, RunBilling, RunInfo, RunReports, RunRequest, UserPublic, WebConfig
 from .storage import WebStorage
@@ -103,6 +105,36 @@ def localized_report_titles(language: str) -> dict[str, str]:
     titles = dict(REPORT_TITLES["English"])
     titles.update(REPORT_TITLES.get(language_key(language), {}))
     return titles
+
+
+def configure_runtime_workflow(
+    graph: Any,
+    selected_analysts: list[str],
+    runtime_config: dict[str, Any],
+    secrets: dict[str, str],
+    callbacks: list[Any],
+) -> bool:
+    if runtime_config.get("parallel_initial_analysts"):
+        graph.workflow = parallel_initial_analyst_workflow(
+            graph,
+            selected_analysts,
+            runtime_config,
+            secrets,
+            callbacks,
+        )
+        graph.graph = graph.workflow.compile()
+        return True
+    if has_enabled_llm_routes(runtime_config):
+        graph.workflow = routed_workflow(
+            graph,
+            selected_analysts,
+            runtime_config,
+            secrets,
+            callbacks,
+        )
+        graph.graph = graph.workflow.compile()
+        return True
+    return False
 
 
 class WebEventCallbackHandler(BaseCallbackHandler):
@@ -354,15 +386,13 @@ class RunManager:
                     debug=False,
                     callbacks=[stats_handler, event_handler],
                 )
-                if has_enabled_llm_routes(runtime_config):
-                    graph.workflow = routed_workflow(
-                        graph,
-                        selected_analysts,
-                        runtime_config,
-                        secrets,
-                        [stats_handler, event_handler],
-                    )
-                    graph.graph = graph.workflow.compile()
+                configure_runtime_workflow(
+                    graph,
+                    selected_analysts,
+                    runtime_config,
+                    secrets,
+                    [stats_handler, event_handler],
+                )
             run.emit("status", {"status": "running", "message": localized_event_message(run.config.output_language, "resolving_memory")})
             graph._resolve_pending_entries(run.request.ticker)
 
@@ -395,6 +425,7 @@ class RunManager:
                     "runtimeProvider": runtime_config.get("llm_provider"),
                     "backendUrl": runtime_config.get("backend_url"),
                     "deepseekThinkingMode": runtime_config.get("deepseek_thinking_mode"),
+                    "parallelInitialAnalysts": runtime_config.get("parallel_initial_analysts"),
                     "stockMarket": run.config.stock_market,
                     "inputTicker": run.raw_ticker or run.config.ticker,
                     "marketProfile": runtime_config.get("market_profiles", {}).get(run.config.stock_market, {}),
@@ -409,8 +440,12 @@ class RunManager:
             )
 
             if selected_analysts:
-                first = selected_analysts[0]
-                message_buffer.update_agent_status(f"{first.capitalize()} Analyst", "in_progress")
+                if run.config.parallel_initial_analysts:
+                    for analyst in selected_analysts:
+                        message_buffer.update_agent_status(f"{analyst.capitalize()} Analyst", "in_progress")
+                else:
+                    first = selected_analysts[0]
+                    message_buffer.update_agent_status(f"{first.capitalize()} Analyst", "in_progress")
 
             for chunk in graph.graph.stream(init_agent_state, **args):
                 if run.cancel_requested:
@@ -550,6 +585,8 @@ class RunManager:
                 run.emit("tool", {"phase": "call", "name": name, "args": args})
 
         update_analyst_statuses(message_buffer, chunk)
+        if run.config.parallel_initial_analysts:
+            self._update_parallel_initial_analyst_statuses(message_buffer)
 
         if chunk.get("investment_debate_state"):
             debate = chunk["investment_debate_state"]
@@ -600,6 +637,21 @@ class RunManager:
     def _update_research_team_status(self, message_buffer: MessageBuffer, status: str) -> None:
         for agent in ("Bull Researcher", "Bear Researcher", "Research Manager"):
             message_buffer.update_agent_status(agent, status)
+
+    def _update_parallel_initial_analyst_statuses(self, message_buffer: MessageBuffer) -> None:
+        all_done = bool(message_buffer.selected_analysts)
+        for analyst_key in ANALYST_ORDER:
+            if analyst_key not in message_buffer.selected_analysts:
+                continue
+            report_key = ANALYST_REPORT_MAP[analyst_key]
+            agent_name = ANALYST_AGENT_NAMES[analyst_key]
+            if message_buffer.report_sections.get(report_key):
+                message_buffer.update_agent_status(agent_name, "completed")
+            else:
+                all_done = False
+                message_buffer.update_agent_status(agent_name, "in_progress")
+        if all_done and message_buffer.agent_status.get("Bull Researcher") == "pending":
+            message_buffer.update_agent_status("Bull Researcher", "in_progress")
 
     def _reports_from_state(self, state: dict[str, Any]) -> dict[str, Any]:
         reports: dict[str, Any] = {}

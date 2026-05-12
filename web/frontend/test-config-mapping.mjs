@@ -15,6 +15,10 @@ const mapping = await import(`data:text/javascript;base64,${Buffer.from(compiled
 const methods = [
   { method: 'get_stock_data', category: 'core_stock_apis', label: 'Stock prices', defaultPath: '/stock' },
   { method: 'get_news', category: 'news_data', label: 'Ticker news', defaultPath: '/news' },
+  { method: 'get_fundamentals', category: 'fundamental_data', label: 'Fundamentals', defaultPath: '/fundamentals' },
+  { method: 'get_balance_sheet', category: 'fundamental_data', label: 'Balance sheet', defaultPath: '/balance-sheet' },
+  { method: 'get_cashflow', category: 'fundamental_data', label: 'Cash flow', defaultPath: '/cashflow' },
+  { method: 'get_income_statement', category: 'fundamental_data', label: 'Income statement', defaultPath: '/income-statement' },
 ];
 
 function baseConfig(overrides = {}) {
@@ -47,6 +51,15 @@ function baseConfig(overrides = {}) {
     llmRoutes: {},
     customDataInterfaces: {
       core_stock_apis: { baseUrl: null, endpoints: { get_stock_data: '/stock' } },
+      fundamental_data: {
+        baseUrl: null,
+        endpoints: {
+          get_fundamentals: '/fundamentals',
+          get_balance_sheet: '/balance-sheet',
+          get_cashflow: '/cashflow',
+          get_income_statement: '/income-statement',
+        },
+      },
       news_data: { baseUrl: null, endpoints: { get_news: '/news' } },
     },
     ...overrides,
@@ -136,4 +149,87 @@ test('hydrateLongbridgeProxyConfig keeps ordinary custom APIs as custom when bas
   );
 
   assert.equal(hydrated.dataVendors.core_stock_apis, 'custom');
+});
+
+test('configForBackend maps A-share fundamentals preset to custom without changing Longbridge categories', () => {
+  const payload = mapping.configForBackend(
+    baseConfig({
+      dataVendors: {
+        core_stock_apis: 'longbridge_proxy',
+        technical_indicators: 'longbridge_proxy',
+        fundamental_data: 'a_share_fundamentals',
+        news_data: 'longbridge_proxy',
+      },
+    }),
+    'https://longbridge.example.com',
+    methods,
+    'https://ashare.example.com',
+  );
+
+  assert.equal(payload.dataVendors.core_stock_apis, 'custom');
+  assert.equal(payload.dataVendors.technical_indicators, 'custom');
+  assert.equal(payload.dataVendors.news_data, 'custom');
+  assert.equal(payload.dataVendors.fundamental_data, 'custom');
+  assert.equal(payload.customDataInterfaces.core_stock_apis.baseUrl, 'https://longbridge.example.com');
+  assert.equal(payload.customDataInterfaces.news_data.baseUrl, 'https://longbridge.example.com');
+  assert.equal(payload.customDataInterfaces.fundamental_data.baseUrl, 'https://ashare.example.com');
+  assert.equal(payload.customDataInterfaces.fundamental_data.endpoints.get_fundamentals, '/fundamentals');
+  assert.equal(payload.customDataInterfaces.fundamental_data.endpoints.get_balance_sheet, '/balance-sheet');
+  assert.equal(payload.customDataInterfaces.fundamental_data.endpoints.get_cashflow, '/cashflow');
+  assert.equal(payload.customDataInterfaces.fundamental_data.endpoints.get_income_statement, '/income-statement');
+});
+
+test('configForBackend maps A-share fundamentals method overrides independently', () => {
+  const payload = mapping.configForBackend(
+    baseConfig({
+      toolVendors: {
+        get_fundamentals: 'a_share_fundamentals',
+        get_balance_sheet: 'a_share_fundamentals',
+        get_cashflow: 'a_share_fundamentals',
+        get_income_statement: 'a_share_fundamentals',
+      },
+    }),
+    '',
+    methods,
+    'https://ashare.example.com',
+  );
+
+  assert.equal(payload.dataVendors.fundamental_data, 'yfinance');
+  assert.equal(payload.toolVendors.get_fundamentals, 'custom');
+  assert.equal(payload.toolVendors.get_balance_sheet, 'custom');
+  assert.equal(payload.toolVendors.get_cashflow, 'custom');
+  assert.equal(payload.toolVendors.get_income_statement, 'custom');
+  assert.equal(payload.customDataInterfaces.fundamental_data.baseUrl, 'https://ashare.example.com');
+});
+
+test('hydrateLongbridgeProxyConfig only shows A-share fundamentals for matching fundamental_data base URL', () => {
+  const hydrated = mapping.hydrateLongbridgeProxyConfig(
+    baseConfig({
+      dataVendors: {
+        core_stock_apis: 'custom',
+        technical_indicators: 'yfinance',
+        fundamental_data: 'custom',
+        news_data: 'yfinance',
+      },
+      customDataInterfaces: {
+        core_stock_apis: { baseUrl: 'https://ashare.example.com', endpoints: { get_stock_data: '/stock' } },
+        fundamental_data: {
+          baseUrl: 'https://ashare.example.com/',
+          endpoints: {
+            get_fundamentals: '/fundamentals',
+            get_balance_sheet: '/balance-sheet',
+            get_cashflow: '/cashflow',
+            get_income_statement: '/income-statement',
+          },
+        },
+        news_data: { baseUrl: null, endpoints: { get_news: '/news' } },
+      },
+    }),
+    '',
+    methods,
+    'https://ashare.example.com',
+  );
+
+  assert.equal(hydrated.dataVendors.core_stock_apis, 'custom');
+  assert.equal(hydrated.dataVendors.fundamental_data, 'a_share_fundamentals');
 });

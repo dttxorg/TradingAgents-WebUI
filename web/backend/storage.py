@@ -695,6 +695,7 @@ class WebStorage:
         config["checkpoint_enabled"] = web_config.checkpoint_enabled
         config["max_recur_limit"] = web_config.max_recur_limit
         config["max_parallel_runs"] = web_config.max_parallel_runs
+        config["parallel_initial_analysts"] = web_config.parallel_initial_analysts
         return config
 
 

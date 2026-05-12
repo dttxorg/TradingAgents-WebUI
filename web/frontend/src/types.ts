@@ -70,6 +70,7 @@ export type WebConfig = {
   checkpointEnabled: boolean;
   maxRecurLimit: number;
   maxParallelRuns: number;
+  parallelInitialAnalysts: boolean;
   dataVendors: Record<string, string>;
   toolVendors: Record<string, string>;
   llmRoutes: Record<string, LLMRouteConfig>;

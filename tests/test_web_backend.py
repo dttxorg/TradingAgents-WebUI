@@ -15,9 +15,10 @@ from web.backend.backtesting import BacktestEngine
 from web.backend.constants import CUSTOM_DATA_VENDOR, CUSTOM_OPENAI_PROVIDER, metadata_payload
 from web.backend.custom_data import configure_custom_data_interfaces
 from web.backend.llm_options import apply_deepseek_thinking_kwargs, patched_tradingagents_llm_client_factory
+from web.backend.llm_routing import JOIN_INITIAL_ANALYSTS_NODE, join_initial_analysts, parallel_initial_analyst_workflow
 from web.backend.markets import format_market_ticker, market_profile_prompt
 from web.backend.model_discovery import fetch_provider_models
-from web.backend.runner import RunManager
+from web.backend.runner import RunManager, configure_runtime_workflow
 from web.backend.schemas import BatchRunRequest, BacktestPriceBar, BacktestScheduleConfig, ModelFetchRequest, PricingConfig, RechargeRequest, RunInfo, RunReports, RunRequest, WebConfig
 from web.backend.storage import WebStorage, calculate_analysis_cost, mask_secret, usage_from_stats
 
@@ -68,6 +69,9 @@ def test_backend_keeps_longbridge_as_frontend_only_data_preset():
 
     with pytest.raises(ValidationError):
         WebConfig(toolVendors={"get_stock_data": "longbridge_proxy"})
+
+    with pytest.raises(ValidationError):
+        WebConfig(dataVendors={"fundamental_data": "a_share_fundamentals"})
 
 
 def test_web_config_normalizes_ticker_and_rejects_future_date():
@@ -573,9 +577,48 @@ def test_tool_vendor_custom_requires_category_base_url():
     assert config.custom_data_interfaces["news_data"].base_url == "https://data.example.com"
 
 
+def test_a_share_fundamentals_routes_use_custom_contract_only():
+    with pytest.raises(ValidationError):
+        WebConfig(toolVendors={"get_fundamentals": "a_share_fundamentals"})
+
+    config = WebConfig(
+        toolVendors={
+            "get_fundamentals": CUSTOM_DATA_VENDOR,
+            "get_balance_sheet": CUSTOM_DATA_VENDOR,
+            "get_cashflow": CUSTOM_DATA_VENDOR,
+            "get_income_statement": CUSTOM_DATA_VENDOR,
+        },
+        customDataInterfaces={
+            "fundamental_data": {
+                "baseUrl": "https://ashare.example.com/api",
+                "endpoints": {
+                    "get_fundamentals": "/fundamentals",
+                    "get_balance_sheet": "/balance-sheet",
+                    "get_cashflow": "/cashflow",
+                    "get_income_statement": "/income-statement",
+                },
+            }
+        },
+    )
+
+    assert config.data_vendors["fundamental_data"] == "yfinance"
+    assert config.tool_vendors == {
+        "get_fundamentals": CUSTOM_DATA_VENDOR,
+        "get_balance_sheet": CUSTOM_DATA_VENDOR,
+        "get_cashflow": CUSTOM_DATA_VENDOR,
+        "get_income_statement": CUSTOM_DATA_VENDOR,
+    }
+    assert config.custom_data_interfaces["fundamental_data"].base_url == "https://ashare.example.com/api"
+    assert config.custom_data_interfaces["fundamental_data"].endpoints["get_fundamentals"] == "/fundamentals"
+    assert config.custom_data_interfaces["fundamental_data"].endpoints["get_balance_sheet"] == "/balance-sheet"
+    assert config.custom_data_interfaces["fundamental_data"].endpoints["get_cashflow"] == "/cashflow"
+    assert config.custom_data_interfaces["fundamental_data"].endpoints["get_income_statement"] == "/income-statement"
+
+
 def test_llm_routes_validate_and_persist_runtime_config(tmp_path):
     config = WebConfig(
         maxParallelRuns=3,
+        parallelInitialAnalysts=True,
         llmRoutes={
             "market_analyst": {
                 "enabled": True,
@@ -587,12 +630,18 @@ def test_llm_routes_validate_and_persist_runtime_config(tmp_path):
     )
 
     storage = WebStorage(tmp_path)
+    storage.save_config(config)
+    loaded_config = storage.load_config()
     runtime_config = storage.runtime_config(config)
 
+    assert loaded_config.parallel_initial_analysts is True
     assert runtime_config["llm_routes"]["market_analyst"]["enabled"] is True
     assert runtime_config["llm_routes"]["market_analyst"]["provider"] == "moonshot"
     assert runtime_config["llm_routes"]["market_analyst"]["modelId"] == "moonshot-v1-8k"
     assert runtime_config["max_parallel_runs"] == 3
+    assert runtime_config["parallel_initial_analysts"] is True
+    assert config.model_dump(mode="json", by_alias=True)["parallelInitialAnalysts"] is True
+    assert WebConfig().parallel_initial_analysts is False
 
     with pytest.raises(ValidationError):
         WebConfig(llmRoutes={"unknown_agent": {"enabled": True}})
@@ -602,6 +651,149 @@ def test_llm_routes_validate_and_persist_runtime_config(tmp_path):
 
     with pytest.raises(ValidationError):
         WebConfig(maxParallelRuns=0)
+
+
+def test_parallel_initial_analyst_join_preserves_reports():
+    state = {
+        "company_of_interest": "SPY",
+        "market_report": "m",
+        "sentiment_report": "s",
+        "news_report": "n",
+        "fundamentals_report": "f",
+    }
+
+    assert join_initial_analysts(state) == {}
+    assert state["market_report"] == "m"
+    assert state["sentiment_report"] == "s"
+    assert state["news_report"] == "n"
+    assert state["fundamentals_report"] == "f"
+
+
+def test_parallel_initial_analyst_workflow_topology(monkeypatch):
+    created = {}
+
+    class FakeWorkflow:
+        def __init__(self, state_type):
+            self.state_type = state_type
+            self.nodes = {}
+            self.edges = []
+            self.waiting_edges = []
+            self.conditional_edges = []
+            created["workflow"] = self
+
+        def add_node(self, name, node):
+            self.nodes[name] = node
+            return self
+
+        def add_edge(self, start, end):
+            if isinstance(start, list):
+                self.waiting_edges.append((tuple(start), end))
+            else:
+                self.edges.append((start, end))
+            return self
+
+        def add_conditional_edges(self, start, condition, path_map):
+            self.conditional_edges.append((start, condition, path_map))
+            return self
+
+    def fake_factory(name):
+        def factory(_llm):
+            return lambda state: state
+        factory.__name__ = name
+        return factory
+
+    for name in (
+        "create_market_analyst",
+        "create_social_media_analyst",
+        "create_news_analyst",
+        "create_fundamentals_analyst",
+        "create_bull_researcher",
+        "create_bear_researcher",
+        "create_research_manager",
+        "create_trader",
+        "create_aggressive_debator",
+        "create_neutral_debator",
+        "create_conservative_debator",
+        "create_portfolio_manager",
+    ):
+        monkeypatch.setattr(f"web.backend.llm_routing.{name}", fake_factory(name))
+    monkeypatch.setattr("web.backend.llm_routing.StateGraph", FakeWorkflow)
+
+    class FakeConditionalLogic:
+        def __getattr__(self, _name):
+            return lambda state: "next"
+
+    class FakeGraph:
+        quick_thinking_llm = object()
+        deep_thinking_llm = object()
+        tool_nodes = {
+            "market": "tools_market_node",
+            "social": "tools_social_node",
+            "news": "tools_news_node",
+            "fundamentals": "tools_fundamentals_node",
+        }
+        conditional_logic = FakeConditionalLogic()
+
+    workflow = parallel_initial_analyst_workflow(
+        FakeGraph(),
+        ["market", "social", "news", "fundamentals"],
+        {},
+        {},
+        [],
+    )
+
+    assert workflow is created["workflow"]
+    assert JOIN_INITIAL_ANALYSTS_NODE in workflow.nodes
+    assert ("__start__", "Market Analyst") in workflow.edges
+    assert ("__start__", "Social Analyst") in workflow.edges
+    assert ("__start__", "News Analyst") in workflow.edges
+    assert ("__start__", "Fundamentals Analyst") in workflow.edges
+    assert (
+        ("Msg Clear Market", "Msg Clear Social", "Msg Clear News", "Msg Clear Fundamentals"),
+        JOIN_INITIAL_ANALYSTS_NODE,
+    ) in workflow.waiting_edges
+    assert (JOIN_INITIAL_ANALYSTS_NODE, "Bull Researcher") in workflow.edges
+
+
+def test_runner_workflow_selection_defaults_to_serial_and_uses_parallel_when_enabled(monkeypatch):
+    calls = []
+
+    class FakeWorkflow:
+        def __init__(self, name):
+            self.name = name
+
+        def compile(self):
+            calls.append((self.name, "compile"))
+            return f"{self.name}-compiled"
+
+    class FakeGraph:
+        workflow = "upstream-workflow"
+        graph = "upstream-compiled"
+
+    monkeypatch.setattr("web.backend.runner.routed_workflow", lambda *args: calls.append(("routed", args)) or FakeWorkflow("routed"))
+    monkeypatch.setattr("web.backend.runner.parallel_initial_analyst_workflow", lambda *args: calls.append(("parallel", args)) or FakeWorkflow("parallel"))
+
+    graph = FakeGraph()
+    assert configure_runtime_workflow(graph, ["market"], {"parallel_initial_analysts": False, "llm_routes": {}}, {}, []) is False
+    assert graph.workflow == "upstream-workflow"
+    assert graph.graph == "upstream-compiled"
+
+    graph = FakeGraph()
+    assert configure_runtime_workflow(
+        graph,
+        ["market"],
+        {"parallel_initial_analysts": False, "llm_routes": {"market_analyst": {"enabled": True}}},
+        {},
+        [],
+    ) is True
+    assert graph.workflow.name == "routed"
+    assert graph.graph == "routed-compiled"
+
+    graph = FakeGraph()
+    assert configure_runtime_workflow(graph, ["market"], {"parallel_initial_analysts": True, "llm_routes": {}}, {}, []) is True
+    assert graph.workflow.name == "parallel"
+    assert graph.graph == "parallel-compiled"
+    assert calls[-2][0] == "parallel"
 
 
 def test_custom_data_vendor_posts_to_configured_endpoint(monkeypatch):

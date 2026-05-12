@@ -180,6 +180,7 @@ class WebConfig(APIModel):
     checkpoint_enabled: bool = DEFAULT_CONFIG["checkpoint_enabled"]
     max_recur_limit: int = DEFAULT_CONFIG["max_recur_limit"]
     max_parallel_runs: int = 1
+    parallel_initial_analysts: bool = False
     data_vendors: dict[str, str] = Field(default_factory=_default_data_vendors)
     tool_vendors: dict[str, str] = Field(default_factory=dict)
     llm_routes: dict[str, LLMRouteConfig] = Field(default_factory=dict)
