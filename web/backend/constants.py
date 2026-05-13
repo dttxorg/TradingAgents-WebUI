@@ -98,8 +98,8 @@ STOCK_MARKETS = [
 
 DEFAULT_MARKET_PROFILES = {
     "us": {
-        "region": "us",
-        "appendRegionSuffix": True,
+        "region": "",
+        "appendRegionSuffix": False,
         "weight": "1",
         "marketProfile": "US equities / ETFs. Emphasize USD pricing, US exchange hours, SEC filings, Fed policy, sector rotation, and US macro context.",
     },

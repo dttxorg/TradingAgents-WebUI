@@ -191,9 +191,25 @@ export function hydrateDataVendorPresetConfig(
   );
 }
 
+function normalizeUsMarketProfile(config: WebConfig): WebConfig {
+  if (config.stockMarket !== 'us') return config;
+  const current = config.marketProfiles?.us;
+  return {
+    ...config,
+    marketProfiles: {
+      ...(config.marketProfiles ?? {}),
+      us: {
+        ...(current ?? { weight: '1', marketProfile: '' }),
+        region: '',
+        appendRegionSuffix: false,
+      },
+    },
+  };
+}
+
 export function configForBackend(config: WebConfig, baseUrl: string, methods: Metadata['customDataMethods'], ashareFundamentalsBaseUrl = '') {
   const prepared = syncDataVendorPresetBaseUrls(
-    config,
+    normalizeUsMarketProfile(config),
     { longbridgeProxyBaseUrl: baseUrl, ashareFundamentalsBaseUrl },
     methods,
   );

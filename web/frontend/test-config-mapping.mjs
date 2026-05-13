@@ -66,6 +66,27 @@ function baseConfig(overrides = {}) {
   };
 }
 
+test('configForBackend preserves US tickers as bare symbols even when old saved config has .us suffix enabled', () => {
+  const payload = mapping.configForBackend(
+    baseConfig({
+      stockMarket: 'us',
+      marketProfiles: {
+        us: {
+          region: 'us',
+          appendRegionSuffix: true,
+          weight: '1',
+          marketProfile: 'US equities / ETFs.',
+        },
+      },
+    }),
+    '',
+    methods,
+  );
+
+  assert.equal(payload.marketProfiles.us.region, '');
+  assert.equal(payload.marketProfiles.us.appendRegionSuffix, false);
+});
+
 test('configForBackend converts Longbridge preset vendors to custom', () => {
   const payload = mapping.configForBackend(
     baseConfig({

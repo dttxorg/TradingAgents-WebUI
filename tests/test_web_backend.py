@@ -84,9 +84,9 @@ def test_web_config_normalizes_ticker_and_rejects_future_date():
 
 def test_market_profiles_format_bare_tickers_and_prompt_context():
     us_config = WebConfig(ticker="SPY")
-    assert us_config.market_profiles["us"].region == "us"
-    assert us_config.market_profiles["us"].append_region_suffix is True
-    assert format_market_ticker("SPY", us_config) == "SPY.us"
+    assert us_config.market_profiles["us"].region == ""
+    assert us_config.market_profiles["us"].append_region_suffix is False
+    assert format_market_ticker("SPY", us_config) == "SPY"
     assert format_market_ticker("SPY.US", us_config) == "SPY.US"
 
     no_suffix_config = WebConfig(
