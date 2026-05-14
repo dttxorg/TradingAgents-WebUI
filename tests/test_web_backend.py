@@ -105,6 +105,13 @@ def test_market_profiles_format_bare_tickers_and_prompt_context():
     assert blank_region_config.market_profiles["us"].region == ""
     assert format_market_ticker("SPY", blank_region_config) == "SPY"
 
+    stale_us_config = WebConfig(
+        ticker="SPY",
+        marketProfiles={"us": {"region": "us", "appendRegionSuffix": True, "weight": "1", "marketProfile": "Old saved US profile."}},
+    )
+    assert stale_us_config.market_profiles["us"].append_region_suffix is True
+    assert format_market_ticker("SPY", stale_us_config) == "SPY"
+
     config = WebConfig(
         ticker="0700",
         stockMarket="hk",

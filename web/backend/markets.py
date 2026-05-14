@@ -13,6 +13,8 @@ MARKET_LABELS = {item["key"]: item["label"] for item in STOCK_MARKETS}
 
 def format_market_ticker(ticker: str, config: WebConfig) -> str:
     symbol = normalize_ticker_symbol(ticker)
+    if config.stock_market == "us":
+        return symbol
     profile = config.market_profiles.get(config.stock_market)
     if profile is None or not profile.append_region_suffix:
         return symbol
