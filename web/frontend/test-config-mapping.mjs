@@ -41,6 +41,7 @@ function baseConfig(overrides = {}) {
     checkpointEnabled: true,
     maxRecurLimit: 100,
     maxParallelRuns: 1,
+    parallelInitialAnalysts: false,
     dataVendors: {
       core_stock_apis: 'yfinance',
       technical_indicators: 'yfinance',
@@ -48,6 +49,7 @@ function baseConfig(overrides = {}) {
       news_data: 'yfinance',
     },
     toolVendors: {},
+    marketDataOverrides: {},
     llmRoutes: {},
     customDataInterfaces: {
       core_stock_apis: { baseUrl: null, endpoints: { get_stock_data: '/stock' } },
@@ -190,14 +192,17 @@ test('configForBackend maps A-share fundamentals preset to custom without changi
   assert.equal(payload.dataVendors.core_stock_apis, 'custom');
   assert.equal(payload.dataVendors.technical_indicators, 'custom');
   assert.equal(payload.dataVendors.news_data, 'custom');
-  assert.equal(payload.dataVendors.fundamental_data, 'custom');
+  assert.equal(payload.dataVendors.fundamental_data, 'yfinance');
   assert.equal(payload.customDataInterfaces.core_stock_apis.baseUrl, 'https://longbridge.example.com');
   assert.equal(payload.customDataInterfaces.news_data.baseUrl, 'https://longbridge.example.com');
-  assert.equal(payload.customDataInterfaces.fundamental_data.baseUrl, 'https://ashare.example.com');
-  assert.equal(payload.customDataInterfaces.fundamental_data.endpoints.get_fundamentals, '/fundamentals');
-  assert.equal(payload.customDataInterfaces.fundamental_data.endpoints.get_balance_sheet, '/balance-sheet');
-  assert.equal(payload.customDataInterfaces.fundamental_data.endpoints.get_cashflow, '/cashflow');
-  assert.equal(payload.customDataInterfaces.fundamental_data.endpoints.get_income_statement, '/income-statement');
+  assert.equal(payload.customDataInterfaces.fundamental_data.baseUrl, null);
+  assert.equal(payload.marketDataOverrides.sh.dataVendors.fundamental_data, 'custom');
+  assert.equal(payload.marketDataOverrides.sz.dataVendors.fundamental_data, 'custom');
+  assert.equal(payload.marketDataOverrides.sh.customDataInterfaces.fundamental_data.baseUrl, 'https://ashare.example.com');
+  assert.equal(payload.marketDataOverrides.sh.customDataInterfaces.fundamental_data.endpoints.get_fundamentals, '/fundamentals');
+  assert.equal(payload.marketDataOverrides.sh.customDataInterfaces.fundamental_data.endpoints.get_balance_sheet, '/balance-sheet');
+  assert.equal(payload.marketDataOverrides.sh.customDataInterfaces.fundamental_data.endpoints.get_cashflow, '/cashflow');
+  assert.equal(payload.marketDataOverrides.sh.customDataInterfaces.fundamental_data.endpoints.get_income_statement, '/income-statement');
 });
 
 test('configForBackend maps A-share fundamentals method overrides independently', () => {
@@ -216,11 +221,14 @@ test('configForBackend maps A-share fundamentals method overrides independently'
   );
 
   assert.equal(payload.dataVendors.fundamental_data, 'yfinance');
-  assert.equal(payload.toolVendors.get_fundamentals, 'custom');
-  assert.equal(payload.toolVendors.get_balance_sheet, 'custom');
-  assert.equal(payload.toolVendors.get_cashflow, 'custom');
-  assert.equal(payload.toolVendors.get_income_statement, 'custom');
-  assert.equal(payload.customDataInterfaces.fundamental_data.baseUrl, 'https://ashare.example.com');
+  assert.equal(payload.toolVendors.get_fundamentals, undefined);
+  assert.equal(payload.toolVendors.get_balance_sheet, undefined);
+  assert.equal(payload.toolVendors.get_cashflow, undefined);
+  assert.equal(payload.toolVendors.get_income_statement, undefined);
+  assert.equal(payload.customDataInterfaces.fundamental_data.baseUrl, null);
+  assert.equal(payload.marketDataOverrides.sh.toolVendors.get_fundamentals, 'custom');
+  assert.equal(payload.marketDataOverrides.sz.toolVendors.get_income_statement, 'custom');
+  assert.equal(payload.marketDataOverrides.sh.customDataInterfaces.fundamental_data.baseUrl, 'https://ashare.example.com');
 });
 
 test('hydrateLongbridgeProxyConfig only shows A-share fundamentals for matching fundamental_data base URL', () => {
@@ -252,5 +260,24 @@ test('hydrateLongbridgeProxyConfig only shows A-share fundamentals for matching 
   );
 
   assert.equal(hydrated.dataVendors.core_stock_apis, 'custom');
-  assert.equal(hydrated.dataVendors.fundamental_data, 'a_share_fundamentals');
+  assert.equal(hydrated.dataVendors.fundamental_data, 'yfinance');
+  assert.equal(hydrated.marketDataOverrides.sh.dataVendors.fundamental_data, 'a_share_fundamentals');
+  assert.equal(hydrated.marketDataOverrides.sz.dataVendors.fundamental_data, 'a_share_fundamentals');
+  assert.equal(hydrated.marketDataOverrides.sh.customDataInterfaces.fundamental_data.baseUrl, 'https://ashare.example.com');
+});
+
+test('setAshareFundamentalsMarkets enables A-share overrides without changing US/HK defaults', () => {
+  const configured = mapping.setAshareFundamentalsMarkets(
+    baseConfig(),
+    ['sh', 'sz'],
+    'https://ashare.example.com',
+    methods,
+  );
+  const payload = mapping.configForBackend(configured, '', methods, 'https://ashare.example.com');
+
+  assert.equal(payload.dataVendors.fundamental_data, 'yfinance');
+  assert.equal(payload.marketDataOverrides.sh.dataVendors.fundamental_data, 'custom');
+  assert.equal(payload.marketDataOverrides.sz.dataVendors.fundamental_data, 'custom');
+  assert.equal(payload.marketDataOverrides.sh.customDataInterfaces.fundamental_data.baseUrl, 'https://ashare.example.com');
+  assert.equal(payload.marketDataOverrides.sz.customDataInterfaces.fundamental_data.baseUrl, 'https://ashare.example.com');
 });

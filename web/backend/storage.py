@@ -681,6 +681,22 @@ class WebStorage:
             key: value.model_dump(mode="json", by_alias=True)
             for key, value in web_config.custom_data_interfaces.items()
         }
+        market_override = web_config.market_data_overrides.get(web_config.stock_market)
+        if market_override:
+            config["data_vendors"].update(market_override.data_vendors)
+            config["tool_vendors"].update(market_override.tool_vendors)
+            for key, value in market_override.custom_data_interfaces.items():
+                current = config["custom_data_interfaces"].get(key, {"baseUrl": None, "endpoints": {}})
+                payload = value.model_dump(mode="json", by_alias=True)
+                config["custom_data_interfaces"][key] = {
+                    **current,
+                    "baseUrl": payload.get("baseUrl") or current.get("baseUrl"),
+                    "endpoints": {
+                        **current.get("endpoints", {}),
+                        **payload.get("endpoints", {}),
+                    },
+                }
+            config["market_data_override"] = market_override.model_dump(mode="json", by_alias=True)
         config["max_debate_rounds"] = web_config.research_depth
         config["max_risk_discuss_rounds"] = web_config.research_depth
         config["quick_think_llm"] = web_config.quick_think_llm

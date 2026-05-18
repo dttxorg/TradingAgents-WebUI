@@ -51,6 +51,12 @@ export type MarketProfileConfig = {
   marketProfile: string;
 };
 
+export type MarketDataOverrideConfig = {
+  dataVendors: Record<string, string>;
+  toolVendors: Record<string, string>;
+  customDataInterfaces: Record<string, CustomDataInterface>;
+};
+
 export type WebConfig = {
   ticker: string;
   analysisDate: string;
@@ -73,6 +79,7 @@ export type WebConfig = {
   parallelInitialAnalysts: boolean;
   dataVendors: Record<string, string>;
   toolVendors: Record<string, string>;
+  marketDataOverrides: Record<string, MarketDataOverrideConfig>;
   llmRoutes: Record<string, LLMRouteConfig>;
   customDataInterfaces: Record<string, CustomDataInterface>;
 };

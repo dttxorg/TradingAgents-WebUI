@@ -156,6 +156,50 @@ class MarketProfileConfig(APIModel):
         return value.strip()[:2000]
 
 
+class MarketDataOverrideConfig(APIModel):
+    data_vendors: dict[str, str] = Field(default_factory=dict)
+    tool_vendors: dict[str, str] = Field(default_factory=dict)
+    custom_data_interfaces: dict[str, CustomDataInterfaceConfig] = Field(default_factory=dict)
+
+    @field_validator("data_vendors")
+    @classmethod
+    def validate_data_vendors(cls, value: dict[str, str]) -> dict[str, str]:
+        vendors = {}
+        for key, vendor in value.items():
+            if key not in ALLOWED_VENDOR_KEYS:
+                raise ValueError(f"Unsupported data vendor category: {key}")
+            if vendor not in ALLOWED_VENDOR_OPTIONS_BY_KEY[key]:
+                raise ValueError(f"Unsupported data vendor: {vendor}")
+            vendors[key] = vendor
+        return vendors
+
+    @field_validator("tool_vendors")
+    @classmethod
+    def validate_tool_vendors(cls, value: dict[str, str]) -> dict[str, str]:
+        vendors = {}
+        for method, vendor in value.items():
+            if method not in CUSTOM_METHOD_CATEGORIES:
+                raise ValueError(f"Unsupported data tool method: {method}")
+            category = CUSTOM_METHOD_CATEGORIES[method]
+            if vendor == "":
+                continue
+            if vendor not in ALLOWED_VENDOR_OPTIONS_BY_KEY[category]:
+                raise ValueError(f"Unsupported data vendor for {method}: {vendor}")
+            vendors[method] = vendor
+        return vendors
+
+    @model_validator(mode="after")
+    def validate_custom_interfaces(self) -> "MarketDataOverrideConfig":
+        for key, value in self.custom_data_interfaces.items():
+            if key not in ALLOWED_VENDOR_KEYS:
+                raise ValueError(f"Unsupported custom data interface category: {key}")
+            unsupported = set(value.endpoints) - CUSTOM_METHODS_BY_CATEGORY[key]
+            if unsupported:
+                methods = ", ".join(sorted(unsupported))
+                raise ValueError(f"Unsupported custom data method for {key}: {methods}")
+        return self
+
+
 class WebConfig(APIModel):
     ticker: str = "SPY"
     analysis_date: date = Field(default_factory=date.today)
@@ -183,6 +227,7 @@ class WebConfig(APIModel):
     parallel_initial_analysts: bool = False
     data_vendors: dict[str, str] = Field(default_factory=_default_data_vendors)
     tool_vendors: dict[str, str] = Field(default_factory=dict)
+    market_data_overrides: dict[str, MarketDataOverrideConfig] = Field(default_factory=dict)
     llm_routes: dict[str, LLMRouteConfig] = Field(default_factory=dict)
     custom_data_interfaces: dict[str, CustomDataInterfaceConfig] = Field(
         default_factory=lambda: {
@@ -318,6 +363,17 @@ class WebConfig(APIModel):
             profiles[market] = profile
         return profiles
 
+    @field_validator("market_data_overrides")
+    @classmethod
+    def validate_market_data_overrides(cls, value: dict[str, MarketDataOverrideConfig]) -> dict[str, MarketDataOverrideConfig]:
+        overrides = {}
+        for key, override in value.items():
+            market = key.strip().lower()
+            if market not in STOCK_MARKET_KEYS:
+                raise ValueError(f"Unsupported market data override: {key}")
+            overrides[market] = override
+        return overrides
+
     @model_validator(mode="after")
     def validate_custom_interfaces(self) -> "WebConfig":
         if self.llm_provider == CUSTOM_OPENAI_PROVIDER and not self.backend_url:
@@ -350,6 +406,26 @@ class WebConfig(APIModel):
             category = CUSTOM_METHOD_CATEGORIES[method]
             if vendor == CUSTOM_DATA_VENDOR and not merged[category].base_url:
                 raise ValueError(f"Custom data interface for {method} requires a Base URL.")
+
+        for market, override in self.market_data_overrides.items():
+            market_interfaces = {
+                key: CustomDataInterfaceConfig.model_validate(value.model_dump(mode="json", by_alias=True))
+                for key, value in merged.items()
+            }
+            for key, value in override.custom_data_interfaces.items():
+                market_interfaces[key] = CustomDataInterfaceConfig(
+                    base_url=value.base_url if value.base_url is not None else market_interfaces[key].base_url,
+                    endpoints={**market_interfaces[key].endpoints, **value.endpoints},
+                )
+            market_data_vendors = {**self.data_vendors, **override.data_vendors}
+            market_tool_vendors = {**self.tool_vendors, **override.tool_vendors}
+            for key, vendor in market_data_vendors.items():
+                if vendor == CUSTOM_DATA_VENDOR and not market_interfaces[key].base_url:
+                    raise ValueError(f"Custom data interface for {market}.{key} requires a Base URL.")
+            for method, vendor in market_tool_vendors.items():
+                category = CUSTOM_METHOD_CATEGORIES[method]
+                if vendor == CUSTOM_DATA_VENDOR and not market_interfaces[category].base_url:
+                    raise ValueError(f"Custom data interface for {market}.{method} requires a Base URL.")
 
         self.custom_data_interfaces = merged
         return self

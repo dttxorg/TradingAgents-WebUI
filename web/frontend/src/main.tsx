@@ -50,7 +50,8 @@ import type {
   WebConfig,
 } from './types';
 import {
-  ashareFundamentalsCategories,
+  ashareFundamentalsBaseUrlFromConfig,
+  ashareFundamentalsMarkets,
   configForBackend,
   hydrateLongbridgeProxyConfig,
   isAshareFundamentalsVendor,
@@ -59,6 +60,7 @@ import {
   isLongbridgeProxyVendor,
   longbridgeProxyCategories,
   normalizeDisplayVendor,
+  setAshareFundamentalsMarkets,
   syncAshareFundamentalsBaseUrl,
   syncLongbridgeProxyBaseUrl,
   vendorOptions,
@@ -167,9 +169,11 @@ const messages = {
     longbridgeProxyUrlField: 'Proxy Base URL',
     longbridgeProxyPlaceholder: 'https://longbridge-proxy.example.com',
     ashareFundamentalsBaseUrl: 'A-share fundamentals (advanced preset)',
-    ashareFundamentalsHint: 'Routes only fundamental_data and the four fundamentals methods through a custom HTTP service. Tushare Pro is better for production but needs a token/points; AkShare/Eastmoney proxies are useful for quick validation with weaker stability.',
+    ashareFundamentalsHint: 'Market-specific override for Shanghai/Shenzhen A shares only. US/HK fundamentals keep the default backend vendors unless you customize them separately. Tushare Pro is better for production but needs a token/points; AkShare/Eastmoney proxies are useful for quick validation with weaker stability.',
     ashareFundamentalsUrlField: 'A-share fundamentals Base URL',
     ashareFundamentalsPlaceholder: 'https://ashare-fundamentals.example.com',
+    ashareShanghai: 'Shanghai A shares',
+    ashareShenzhen: 'Shenzhen A shares',
     methodOverrides: 'Method-level data routes',
     useCategoryDefault: 'Use category default',
     setupRecommendations: 'Setup recommendations',
@@ -366,9 +370,11 @@ const messages = {
     longbridgeProxyUrlField: '代理 Base URL',
     longbridgeProxyPlaceholder: 'https://longbridge-proxy.example.com',
     ashareFundamentalsBaseUrl: 'A 股基本面接口（高级预设）',
-    ashareFundamentalsHint: '只路由 fundamental_data 和四个基本面方法到自定义 HTTP 服务。Tushare Pro 更适合生产但需要 token/积分；AkShare/东方财富代理适合快速验证但稳定性较弱。',
+    ashareFundamentalsHint: '这是只针对上证/深证 A 股的市场级覆盖；美股/港股基本面会继续使用后端默认数据源，除非你单独自定义。Tushare Pro 更适合生产但需要 token/积分；AkShare/东方财富代理适合快速验证但稳定性较弱。',
     ashareFundamentalsUrlField: 'A 股基本面 Base URL',
     ashareFundamentalsPlaceholder: 'https://ashare-fundamentals.example.com',
+    ashareShanghai: '上证 A 股',
+    ashareShenzhen: '深证 A 股',
     methodOverrides: '按后端方法单独设置数据源',
     useCategoryDefault: '使用分类默认值',
     setupRecommendations: '设置建议',
@@ -647,7 +653,14 @@ function App() {
     ]);
     const loadedMetadata = { ...emptyMetadata, ...metadataValue };
     setMetadata(loadedMetadata);
-    setConfig(hydrateLongbridgeProxyConfig(configValue, longbridgeProxyBaseUrl, loadedMetadata.customDataMethods, ashareFundamentalsBaseUrl));
+    const hydratedConfig = hydrateLongbridgeProxyConfig(configValue, longbridgeProxyBaseUrl, loadedMetadata.customDataMethods, ashareFundamentalsBaseUrl);
+    const inferredAshareBaseUrl = ashareFundamentalsBaseUrl || ashareFundamentalsBaseUrlFromConfig(hydratedConfig);
+    if (!ashareFundamentalsBaseUrl && inferredAshareBaseUrl) setAshareFundamentalsBaseUrl(inferredAshareBaseUrl);
+    setConfig(
+      inferredAshareBaseUrl === ashareFundamentalsBaseUrl
+        ? hydratedConfig
+        : hydrateLongbridgeProxyConfig(configValue, longbridgeProxyBaseUrl, loadedMetadata.customDataMethods, inferredAshareBaseUrl),
+    );
     setTickerList(configValue.ticker);
     setPublicPricing(pricingValue);
     setHistory(historyValue.items);
@@ -860,12 +873,13 @@ function App() {
   const showDeepSeekThinkingMode = Boolean(config && (isCustomOpenAi || isDeepSeekConfig(config, provider)));
   const selectedLongbridgeCategories = config ? longbridgeProxyCategories(config, metadata.customDataMethods) : new Set<string>();
   const hasLongbridgeProxyPreset = selectedLongbridgeCategories.size > 0;
-  const selectedAshareFundamentalsCategories = config ? ashareFundamentalsCategories(config, metadata.customDataMethods) : new Set<string>();
-  const hasAshareFundamentalsPreset = selectedAshareFundamentalsCategories.size > 0;
+  const currentAshareFundamentalsBaseUrl = config ? (ashareFundamentalsBaseUrl || ashareFundamentalsBaseUrlFromConfig(config)) : ashareFundamentalsBaseUrl;
+  const selectedAshareFundamentalsMarkets = config ? ashareFundamentalsMarkets(config, metadata.customDataMethods) : new Set<string>();
+  const hasAshareFundamentalsPreset = selectedAshareFundamentalsMarkets.size > 0;
   const outputLocale = outputLanguageLocale(config?.outputLanguage ?? 'English');
   const setupRecommendations = useMemo(
-    () => (config ? buildSetupRecommendations(config, metadata, secretStatus, provider, locale, longbridgeProxyBaseUrl, ashareFundamentalsBaseUrl) : []),
-    [config, metadata, secretStatus, provider, locale, longbridgeProxyBaseUrl, ashareFundamentalsBaseUrl],
+    () => (config ? buildSetupRecommendations(config, metadata, secretStatus, provider, locale, longbridgeProxyBaseUrl, currentAshareFundamentalsBaseUrl) : []),
+    [config, metadata, secretStatus, provider, locale, longbridgeProxyBaseUrl, currentAshareFundamentalsBaseUrl],
   );
   const currentMarketProfile = config ? config.marketProfiles?.[config.stockMarket] : undefined;
 
@@ -909,7 +923,7 @@ function App() {
     if (isLongbridgeProxyVendor(value)) {
       setConfig(syncLongbridgeProxyBaseUrl(nextConfig, longbridgeProxyBaseUrl, metadata.customDataMethods));
     } else if (isAshareFundamentalsVendor(value)) {
-      setConfig(syncAshareFundamentalsBaseUrl(nextConfig, ashareFundamentalsBaseUrl, metadata.customDataMethods));
+      setConfig(syncAshareFundamentalsBaseUrl(nextConfig, currentAshareFundamentalsBaseUrl, metadata.customDataMethods));
     } else {
       setConfig(nextConfig);
     }
@@ -927,7 +941,7 @@ function App() {
     if (isLongbridgeProxyVendor(value)) {
       setConfig(syncLongbridgeProxyBaseUrl(nextConfig, longbridgeProxyBaseUrl, metadata.customDataMethods));
     } else if (isAshareFundamentalsVendor(value)) {
-      setConfig(syncAshareFundamentalsBaseUrl(nextConfig, ashareFundamentalsBaseUrl, metadata.customDataMethods));
+      setConfig(syncAshareFundamentalsBaseUrl(nextConfig, currentAshareFundamentalsBaseUrl, metadata.customDataMethods));
     } else {
       setConfig(nextConfig);
     }
@@ -935,12 +949,23 @@ function App() {
 
   function updateLongbridgeProxyBaseUrl(value: string) {
     setLongbridgeProxyBaseUrl(value);
-    setConfig((current) => (current ? hydrateLongbridgeProxyConfig(current, value, metadata.customDataMethods, ashareFundamentalsBaseUrl) : current));
+    setConfig((current) => (current ? hydrateLongbridgeProxyConfig(current, value, metadata.customDataMethods, currentAshareFundamentalsBaseUrl) : current));
   }
 
   function updateAshareFundamentalsBaseUrl(value: string) {
     setAshareFundamentalsBaseUrl(value);
     setConfig((current) => (current ? hydrateLongbridgeProxyConfig(current, longbridgeProxyBaseUrl, metadata.customDataMethods, value) : current));
+  }
+
+  function toggleAshareFundamentalsMarket(market: 'sh' | 'sz', enabled: boolean) {
+    if (!config) return;
+    const markets = new Set(ashareFundamentalsMarkets(config, metadata.customDataMethods));
+    if (enabled) {
+      markets.add(market);
+    } else {
+      markets.delete(market);
+    }
+    setConfig(setAshareFundamentalsMarkets(config, [...markets], currentAshareFundamentalsBaseUrl, metadata.customDataMethods));
   }
 
   function updateLlmRoute(routeKey: string, patch: Partial<WebConfig['llmRoutes'][string]>) {
@@ -978,8 +1003,8 @@ function App() {
     };
     const nextConfig = { ...config, customDataInterfaces: nextInterfaces };
     setConfig(
-      isLongbridgeProxyBaseUrl(value, longbridgeProxyBaseUrl) || isLongbridgeProxyBaseUrl(value, ashareFundamentalsBaseUrl)
-        ? hydrateLongbridgeProxyConfig(nextConfig, longbridgeProxyBaseUrl, metadata.customDataMethods, ashareFundamentalsBaseUrl)
+      isLongbridgeProxyBaseUrl(value, longbridgeProxyBaseUrl) || isLongbridgeProxyBaseUrl(value, currentAshareFundamentalsBaseUrl)
+        ? hydrateLongbridgeProxyConfig(nextConfig, longbridgeProxyBaseUrl, metadata.customDataMethods, currentAshareFundamentalsBaseUrl)
         : nextConfig,
     );
   }
@@ -1005,8 +1030,8 @@ function App() {
     setSaving(true);
     setError(null);
     try {
-      const saved = await api.saveConfig(configForBackend(config, longbridgeProxyBaseUrl, metadata.customDataMethods, ashareFundamentalsBaseUrl));
-      setConfig(hydrateLongbridgeProxyConfig(saved, longbridgeProxyBaseUrl, metadata.customDataMethods, ashareFundamentalsBaseUrl));
+      const saved = await api.saveConfig(configForBackend(config, longbridgeProxyBaseUrl, metadata.customDataMethods, currentAshareFundamentalsBaseUrl));
+      setConfig(hydrateLongbridgeProxyConfig(saved, longbridgeProxyBaseUrl, metadata.customDataMethods, currentAshareFundamentalsBaseUrl));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1107,7 +1132,7 @@ function App() {
       setError(locale === 'zh' ? '至少需要一个股票代码。' : 'At least one ticker is required.');
       return;
     }
-    const runConfig = configForBackend({ ...config, ticker: tickers[0] }, longbridgeProxyBaseUrl, metadata.customDataMethods, ashareFundamentalsBaseUrl);
+    const runConfig = configForBackend({ ...config, ticker: tickers[0] }, longbridgeProxyBaseUrl, metadata.customDataMethods, currentAshareFundamentalsBaseUrl);
     setRunning(true);
     setError(null);
     setEvents([]);
@@ -1117,7 +1142,7 @@ function App() {
     setBatchRuns([]);
     try {
       const saved = isAdmin ? await api.saveConfig(runConfig) : runConfig;
-      if (isAdmin) setConfig(hydrateLongbridgeProxyConfig(saved, longbridgeProxyBaseUrl, metadata.customDataMethods, ashareFundamentalsBaseUrl));
+      if (isAdmin) setConfig(hydrateLongbridgeProxyConfig(saved, longbridgeProxyBaseUrl, metadata.customDataMethods, currentAshareFundamentalsBaseUrl));
       if (tickers.length > 1) {
         const batch = await api.createBatchRuns(tickers, saved);
         setBatchRuns(batch.runs);
@@ -1656,11 +1681,29 @@ function App() {
                 <label className="field">
                   <span>{t.ashareFundamentalsUrlField}</span>
                   <input
-                    value={ashareFundamentalsBaseUrl}
+                    value={currentAshareFundamentalsBaseUrl}
                     onChange={(event) => updateAshareFundamentalsBaseUrl(event.target.value)}
                     placeholder={ASHARE_FUNDAMENTALS_ENV || t.ashareFundamentalsPlaceholder}
                   />
                 </label>
+                <div className="inline-toggle-grid">
+                  <label className="toggle-row compact-toggle">
+                    <input
+                      type="checkbox"
+                      checked={selectedAshareFundamentalsMarkets.has('sh')}
+                      onChange={(event) => toggleAshareFundamentalsMarket('sh', event.target.checked)}
+                    />
+                    <span>{t.ashareShanghai}</span>
+                  </label>
+                  <label className="toggle-row compact-toggle">
+                    <input
+                      type="checkbox"
+                      checked={selectedAshareFundamentalsMarkets.has('sz')}
+                      onChange={(event) => toggleAshareFundamentalsMarket('sz', event.target.checked)}
+                    />
+                    <span>{t.ashareShenzhen}</span>
+                  </label>
+                </div>
               </details>
               <div className="custom-interface-list">
                 {metadata.dataVendorCategories.map((category) => {
@@ -3001,7 +3044,7 @@ function buildSetupRecommendations(
 
   const customCategories = new Set<string>();
   const longbridgeCategories = longbridgeProxyCategories(config, metadata.customDataMethods);
-  const ashareCategories = ashareFundamentalsCategories(config, metadata.customDataMethods);
+  const ashareMarkets = ashareFundamentalsMarkets(config, metadata.customDataMethods);
   Object.entries(config.dataVendors).forEach(([category, vendor]) => {
     if (isCustomLikeDataVendor(vendor)) customCategories.add(category);
   });
@@ -3026,7 +3069,7 @@ function buildSetupRecommendations(
     items.push(locale === 'zh' ? `已选择长桥只读代理，但 Longbridge Proxy Base URL 为空：${names}。` : `Longbridge read-only proxy is selected, but Longbridge Proxy Base URL is empty for: ${names}.`);
   }
 
-  if (ashareCategories.size > 0 && !ashareFundamentalsBaseUrl.trim()) {
+  if (ashareMarkets.size > 0 && !ashareFundamentalsBaseUrl.trim()) {
     items.push(locale === 'zh'
       ? '已选择 A 股基本面接口，但 A 股基本面 Base URL 为空。'
       : 'A-share fundamentals preset is selected, but its Base URL is empty.');
@@ -3034,7 +3077,6 @@ function buildSetupRecommendations(
 
   const missingCustomBase = [...customCategories].filter((category) => (
     !longbridgeCategories.has(category) &&
-    !ashareCategories.has(category) &&
     !config.customDataInterfaces[category]?.baseUrl
   ));
   if (missingCustomBase.length > 0) {

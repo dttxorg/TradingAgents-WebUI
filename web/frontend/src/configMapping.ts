@@ -9,6 +9,7 @@ export const ASHARE_FUNDAMENTALS_METHODS = new Set([
   'get_cashflow',
   'get_income_statement',
 ]);
+export const ASHARE_MARKETS = ['sh', 'sz'] as const;
 
 export function isLongbridgeProxyVendor(vendor: string | null | undefined) {
   return vendor === LONGBRIDGE_PROXY_VENDOR || vendor === 'longbridge';
@@ -35,17 +36,22 @@ export function normalizedBaseUrl(value: string | null | undefined) {
   return (value ?? '').trim().replace(/\/+$/, '');
 }
 
+export function isAshareMarket(market: string | null | undefined) {
+  return market === 'sh' || market === 'sz';
+}
+
 export function isLongbridgeProxyBaseUrl(value: string | null | undefined, proxyBaseUrl: string | null | undefined) {
   const normalizedValue = normalizedBaseUrl(value);
   const normalizedProxy = normalizedBaseUrl(proxyBaseUrl);
   return Boolean(normalizedValue && normalizedProxy && normalizedValue === normalizedProxy);
 }
 
-export function vendorOptions(options: string[], context?: { category?: string; method?: string }) {
+export function vendorOptions(options: string[], context?: { category?: string; method?: string; market?: string; allowAsharePreset?: boolean }) {
   const next = options.includes(LONGBRIDGE_PROXY_VENDOR) ? [...options] : [...options, LONGBRIDGE_PROXY_VENDOR];
   const isAshareFundamentalTarget =
     context?.category === ASHARE_FUNDAMENTALS_CATEGORY &&
-    (!context.method || ASHARE_FUNDAMENTALS_METHODS.has(context.method));
+    (!context.method || ASHARE_FUNDAMENTALS_METHODS.has(context.method)) &&
+    (context.allowAsharePreset || isAshareMarket(context.market));
   if (isAshareFundamentalTarget && !next.includes(ASHARE_FUNDAMENTALS_VENDOR)) {
     next.push(ASHARE_FUNDAMENTALS_VENDOR);
   }
@@ -62,6 +68,57 @@ function defaultEndpointsForCategory(category: string, methods: Metadata['custom
       .filter((method) => method.category === category)
       .map((method) => [method.method, method.defaultPath]),
   );
+}
+
+function defaultAshareFundamentalsInterface(baseUrl: string, methods: Metadata['customDataMethods']) {
+  return {
+    baseUrl: baseUrl.trim() || null,
+    endpoints: defaultEndpointsForCategory(ASHARE_FUNDAMENTALS_CATEGORY, methods),
+  };
+}
+
+function isEmptyRecord(value: Record<string, unknown> | undefined) {
+  return !value || Object.keys(value).length === 0;
+}
+
+function pruneMarketDataOverrides(overrides: WebConfig['marketDataOverrides']) {
+  return Object.fromEntries(
+    Object.entries(overrides ?? {}).filter(([, override]) => (
+      !isEmptyRecord(override.dataVendors) ||
+      !isEmptyRecord(override.toolVendors) ||
+      !isEmptyRecord(override.customDataInterfaces)
+    )),
+  );
+}
+
+function marketOverride(config: WebConfig, market: string) {
+  return config.marketDataOverrides?.[market] ?? {
+    dataVendors: {},
+    toolVendors: {},
+    customDataInterfaces: {},
+  };
+}
+
+function setMarketOverride(config: WebConfig, market: string, override: WebConfig['marketDataOverrides'][string]) {
+  const nextOverrides = {
+    ...(config.marketDataOverrides ?? {}),
+    [market]: override,
+  };
+  return { ...config, marketDataOverrides: pruneMarketDataOverrides(nextOverrides) };
+}
+
+export function effectiveMarketDataVendors(config: WebConfig, market = config.stockMarket) {
+  return {
+    ...config.dataVendors,
+    ...(config.marketDataOverrides?.[market]?.dataVendors ?? {}),
+  };
+}
+
+export function effectiveMarketToolVendors(config: WebConfig, market = config.stockMarket) {
+  return {
+    ...(config.toolVendors ?? {}),
+    ...(config.marketDataOverrides?.[market]?.toolVendors ?? {}),
+  };
 }
 
 export function longbridgeProxyCategories(config: WebConfig, methods: Metadata['customDataMethods']) {
@@ -94,6 +151,42 @@ export function ashareFundamentalsCategories(config: WebConfig, methods: Metadat
   return categories;
 }
 
+export function ashareFundamentalsMarkets(config: WebConfig, methods: Metadata['customDataMethods']) {
+  const markets = new Set<string>();
+  const methodCategory = methodCategoryMap(methods);
+  Object.entries(config.marketDataOverrides ?? {}).forEach(([market, override]) => {
+    if (!isAshareMarket(market)) return;
+    Object.entries(override.dataVendors ?? {}).forEach(([category, vendor]) => {
+      if (category === ASHARE_FUNDAMENTALS_CATEGORY && isAshareFundamentalsVendor(vendor)) {
+        markets.add(market);
+      }
+    });
+    Object.entries(override.toolVendors ?? {}).forEach(([method, vendor]) => {
+      const category = methodCategory[method];
+      if (category === ASHARE_FUNDAMENTALS_CATEGORY && ASHARE_FUNDAMENTALS_METHODS.has(method) && isAshareFundamentalsVendor(vendor)) {
+        markets.add(market);
+      }
+    });
+  });
+  return markets;
+}
+
+export function ashareFundamentalsBaseUrlFromConfig(config: WebConfig) {
+  for (const market of ASHARE_MARKETS) {
+    const override = config.marketDataOverrides?.[market];
+    const baseUrl = override?.customDataInterfaces?.[ASHARE_FUNDAMENTALS_CATEGORY]?.baseUrl;
+    const categoryVendor = override?.dataVendors?.[ASHARE_FUNDAMENTALS_CATEGORY];
+    const methodUsesAshare = [...ASHARE_FUNDAMENTALS_METHODS].some((method) => (
+      isAshareFundamentalsVendor(override?.toolVendors?.[method]) ||
+      override?.toolVendors?.[method] === 'custom'
+    ));
+    if (baseUrl && (isAshareFundamentalsVendor(categoryVendor) || categoryVendor === 'custom' || methodUsesAshare)) {
+      return baseUrl;
+    }
+  }
+  return '';
+}
+
 export function syncLongbridgeProxyBaseUrl(config: WebConfig, baseUrl: string, methods: Metadata['customDataMethods']) {
   const categories = longbridgeProxyCategories(config, methods);
   if (categories.size === 0) return config;
@@ -113,21 +206,56 @@ export function syncLongbridgeProxyBaseUrl(config: WebConfig, baseUrl: string, m
 }
 
 export function syncAshareFundamentalsBaseUrl(config: WebConfig, baseUrl: string, methods: Metadata['customDataMethods']) {
-  const categories = ashareFundamentalsCategories(config, methods);
-  if (categories.size === 0) return config;
-  const nextInterfaces = { ...config.customDataInterfaces };
-  categories.forEach((category) => {
-    const current = nextInterfaces[category] ?? { baseUrl: null, endpoints: {} };
-    nextInterfaces[category] = {
-      ...current,
-      baseUrl: baseUrl.trim() || null,
-      endpoints: {
-        ...defaultEndpointsForCategory(category, methods),
-        ...current.endpoints,
-      },
-    };
+  const markets = ashareFundamentalsMarkets(config, methods);
+  if (markets.size === 0) return config;
+  return setAshareFundamentalsMarkets(config, [...markets], baseUrl, methods);
+}
+
+export function setAshareFundamentalsMarkets(
+  config: WebConfig,
+  markets: string[],
+  baseUrl: string,
+  methods: Metadata['customDataMethods'],
+) {
+  let nextConfig = config;
+  const enabledMarkets = new Set(markets.filter(isAshareMarket));
+  ASHARE_MARKETS.forEach((market) => {
+    const current = marketOverride(nextConfig, market);
+    const dataVendors = { ...(current.dataVendors ?? {}) };
+    const toolVendors = { ...(current.toolVendors ?? {}) };
+    const customDataInterfaces = { ...(current.customDataInterfaces ?? {}) };
+
+    if (enabledMarkets.has(market)) {
+      dataVendors[ASHARE_FUNDAMENTALS_CATEGORY] = ASHARE_FUNDAMENTALS_VENDOR;
+      customDataInterfaces[ASHARE_FUNDAMENTALS_CATEGORY] = {
+        ...defaultAshareFundamentalsInterface(baseUrl, methods),
+        ...(customDataInterfaces[ASHARE_FUNDAMENTALS_CATEGORY] ?? {}),
+        baseUrl: baseUrl.trim() || null,
+        endpoints: {
+          ...defaultEndpointsForCategory(ASHARE_FUNDAMENTALS_CATEGORY, methods),
+          ...(customDataInterfaces[ASHARE_FUNDAMENTALS_CATEGORY]?.endpoints ?? {}),
+        },
+      };
+    } else {
+      if (isAshareFundamentalsVendor(dataVendors[ASHARE_FUNDAMENTALS_CATEGORY])) {
+        delete dataVendors[ASHARE_FUNDAMENTALS_CATEGORY];
+      }
+      ASHARE_FUNDAMENTALS_METHODS.forEach((method) => {
+        if (isAshareFundamentalsVendor(toolVendors[method])) delete toolVendors[method];
+      });
+      const existing = customDataInterfaces[ASHARE_FUNDAMENTALS_CATEGORY];
+      if (existing && normalizedBaseUrl(existing.baseUrl) === normalizedBaseUrl(baseUrl)) {
+        delete customDataInterfaces[ASHARE_FUNDAMENTALS_CATEGORY];
+      }
+    }
+
+    nextConfig = setMarketOverride(nextConfig, market, {
+      dataVendors,
+      toolVendors,
+      customDataInterfaces,
+    });
   });
-  return { ...config, customDataInterfaces: nextInterfaces };
+  return nextConfig;
 }
 
 export function syncDataVendorPresetBaseUrls(
@@ -156,7 +284,9 @@ export function hydrateDataVendorPresetConfig(
   const normalizedAshareBase = normalizedBaseUrl(baseUrls.ashareFundamentalsBaseUrl);
   const nextDataVendors = { ...config.dataVendors };
   const nextToolVendors = { ...(config.toolVendors ?? {}) };
+  let nextMarketDataOverrides = { ...(config.marketDataOverrides ?? {}) };
   const methodCategories = methodCategoryMap(methods);
+  let migrateGlobalAsharePreset = false;
 
   Object.entries(nextDataVendors).forEach(([category, vendor]) => {
     const categoryBase = normalizedBaseUrl(config.customDataInterfaces[category]?.baseUrl);
@@ -164,7 +294,8 @@ export function hydrateDataVendorPresetConfig(
       category === ASHARE_FUNDAMENTALS_CATEGORY &&
       (isAshareFundamentalsVendor(vendor) || (vendor === 'custom' && normalizedAshareBase && categoryBase === normalizedAshareBase))
     ) {
-      nextDataVendors[category] = ASHARE_FUNDAMENTALS_VENDOR;
+      nextDataVendors[category] = 'yfinance';
+      migrateGlobalAsharePreset = true;
     } else if (isLongbridgeProxyVendor(vendor) || (vendor === 'custom' && normalizedLongbridgeBase && categoryBase === normalizedLongbridgeBase)) {
       nextDataVendors[category] = LONGBRIDGE_PROXY_VENDOR;
     }
@@ -178,14 +309,61 @@ export function hydrateDataVendorPresetConfig(
       ASHARE_FUNDAMENTALS_METHODS.has(method) &&
       (isAshareFundamentalsVendor(vendor) || (vendor === 'custom' && normalizedAshareBase && categoryBase === normalizedAshareBase))
     ) {
-      nextToolVendors[method] = ASHARE_FUNDAMENTALS_VENDOR;
+      delete nextToolVendors[method];
+      migrateGlobalAsharePreset = true;
     } else if (isLongbridgeProxyVendor(vendor) || (vendor === 'custom' && normalizedLongbridgeBase && categoryBase === normalizedLongbridgeBase)) {
       nextToolVendors[method] = LONGBRIDGE_PROXY_VENDOR;
     }
   });
 
+  Object.entries(nextMarketDataOverrides).forEach(([market, override]) => {
+    const marketDataVendors = { ...(override.dataVendors ?? {}) };
+    const marketToolVendors = { ...(override.toolVendors ?? {}) };
+    const marketInterfaces = { ...(override.customDataInterfaces ?? {}) };
+    Object.entries(marketDataVendors).forEach(([category, vendor]) => {
+      const categoryBase = normalizedBaseUrl(marketInterfaces[category]?.baseUrl);
+      if (
+        category === ASHARE_FUNDAMENTALS_CATEGORY &&
+        (isAshareFundamentalsVendor(vendor) || (vendor === 'custom' && normalizedAshareBase && categoryBase === normalizedAshareBase))
+      ) {
+        marketDataVendors[category] = ASHARE_FUNDAMENTALS_VENDOR;
+      } else if (isLongbridgeProxyVendor(vendor) || (vendor === 'custom' && normalizedLongbridgeBase && categoryBase === normalizedLongbridgeBase)) {
+        marketDataVendors[category] = LONGBRIDGE_PROXY_VENDOR;
+      }
+    });
+    Object.entries(marketToolVendors).forEach(([method, vendor]) => {
+      const category = methodCategories[method];
+      const categoryBase = normalizedBaseUrl(category ? marketInterfaces[category]?.baseUrl : null);
+      if (
+        category === ASHARE_FUNDAMENTALS_CATEGORY &&
+        ASHARE_FUNDAMENTALS_METHODS.has(method) &&
+        (isAshareFundamentalsVendor(vendor) || (vendor === 'custom' && normalizedAshareBase && categoryBase === normalizedAshareBase))
+      ) {
+        marketToolVendors[method] = ASHARE_FUNDAMENTALS_VENDOR;
+      } else if (isLongbridgeProxyVendor(vendor) || (vendor === 'custom' && normalizedLongbridgeBase && categoryBase === normalizedLongbridgeBase)) {
+        marketToolVendors[method] = LONGBRIDGE_PROXY_VENDOR;
+      }
+    });
+    nextMarketDataOverrides[market] = {
+      dataVendors: marketDataVendors,
+      toolVendors: marketToolVendors,
+      customDataInterfaces: marketInterfaces,
+    };
+  });
+
+  let nextConfig = {
+    ...config,
+    dataVendors: nextDataVendors,
+    toolVendors: nextToolVendors,
+    marketDataOverrides: nextMarketDataOverrides,
+  };
+
+  if (migrateGlobalAsharePreset) {
+    nextConfig = setAshareFundamentalsMarkets(nextConfig, [...ASHARE_MARKETS], baseUrls.ashareFundamentalsBaseUrl ?? '', methods);
+  }
+
   return syncDataVendorPresetBaseUrls(
-    { ...config, dataVendors: nextDataVendors, toolVendors: nextToolVendors },
+    nextConfig,
     baseUrls,
     methods,
   );
@@ -207,18 +385,66 @@ function normalizeUsMarketProfile(config: WebConfig): WebConfig {
   };
 }
 
+function prepareAsharePresetForBackend(config: WebConfig, ashareFundamentalsBaseUrl: string, methods: Metadata['customDataMethods']) {
+  const ashareMethodOverrides = [...ASHARE_FUNDAMENTALS_METHODS].filter((method) => (
+    isAshareFundamentalsVendor((config.toolVendors ?? {})[method])
+  ));
+  const topLevelUsesAshare =
+    isAshareFundamentalsVendor(config.dataVendors[ASHARE_FUNDAMENTALS_CATEGORY]) ||
+    ashareMethodOverrides.length > 0;
+  if (!topLevelUsesAshare) return config;
+
+  const dataVendors = { ...config.dataVendors, [ASHARE_FUNDAMENTALS_CATEGORY]: 'yfinance' };
+  const toolVendors = { ...(config.toolVendors ?? {}) };
+  ASHARE_FUNDAMENTALS_METHODS.forEach((method) => {
+    if (isAshareFundamentalsVendor(toolVendors[method])) delete toolVendors[method];
+  });
+  let nextConfig = setAshareFundamentalsMarkets(
+    { ...config, dataVendors, toolVendors },
+    [...ASHARE_MARKETS],
+    ashareFundamentalsBaseUrl,
+    methods,
+  );
+  if (ashareMethodOverrides.length > 0) {
+    ASHARE_MARKETS.forEach((market) => {
+      const current = marketOverride(nextConfig, market);
+      const marketToolVendors = { ...(current.toolVendors ?? {}) };
+      ashareMethodOverrides.forEach((method) => {
+        marketToolVendors[method] = ASHARE_FUNDAMENTALS_VENDOR;
+      });
+      nextConfig = setMarketOverride(nextConfig, market, {
+        ...current,
+        toolVendors: marketToolVendors,
+      });
+    });
+  }
+  return nextConfig;
+}
+
+function normalizeBackendVendors(vendors: Record<string, string> | undefined) {
+  return Object.fromEntries(
+    Object.entries(vendors ?? {}).map(([key, vendor]) => [key, isPresetDataVendor(vendor) ? 'custom' : vendor]),
+  );
+}
+
 export function configForBackend(config: WebConfig, baseUrl: string, methods: Metadata['customDataMethods'], ashareFundamentalsBaseUrl = '') {
   const prepared = syncDataVendorPresetBaseUrls(
-    normalizeUsMarketProfile(config),
+    prepareAsharePresetForBackend(normalizeUsMarketProfile(config), ashareFundamentalsBaseUrl, methods),
     { longbridgeProxyBaseUrl: baseUrl, ashareFundamentalsBaseUrl },
     methods,
   );
-  const dataVendors = Object.fromEntries(
-    Object.entries(prepared.dataVendors).map(([category, vendor]) => [category, isPresetDataVendor(vendor) ? 'custom' : vendor]),
-  );
-  const toolVendors = Object.fromEntries(
-    Object.entries(prepared.toolVendors ?? {}).map(([method, vendor]) => [method, isPresetDataVendor(vendor) ? 'custom' : vendor]),
+  const dataVendors = normalizeBackendVendors(prepared.dataVendors);
+  const toolVendors = normalizeBackendVendors(prepared.toolVendors);
+  const marketDataOverrides = Object.fromEntries(
+    Object.entries(prepared.marketDataOverrides ?? {}).map(([market, override]) => [
+      market,
+      {
+        ...override,
+        dataVendors: normalizeBackendVendors(override.dataVendors),
+        toolVendors: normalizeBackendVendors(override.toolVendors),
+      },
+    ]),
   );
 
-  return { ...prepared, dataVendors, toolVendors };
+  return { ...prepared, dataVendors, toolVendors, marketDataOverrides };
 }
