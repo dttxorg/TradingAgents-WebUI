@@ -958,6 +958,48 @@ textarea {
   opacity: 1;
 }
 
+.market-data-list {
+  display: grid;
+  gap: 10px;
+}
+
+.market-data-section {
+  border: 1px solid #25373c;
+  border-radius: 8px;
+  background: #0c1215;
+  padding: 9px 10px;
+}
+
+.market-data-section.active {
+  border-color: #4c8e77;
+}
+
+.market-data-section summary {
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #d4dedf;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.market-data-section summary small {
+  color: #708083;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.market-data-body {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.market-custom-interface-list:empty {
+  display: none;
+}
+
 .backtest-settings {
   display: grid;
   gap: 12px;

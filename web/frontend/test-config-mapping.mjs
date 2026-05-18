@@ -281,3 +281,24 @@ test('setAshareFundamentalsMarkets enables A-share overrides without changing US
   assert.equal(payload.marketDataOverrides.sh.customDataInterfaces.fundamental_data.baseUrl, 'https://ashare.example.com');
   assert.equal(payload.marketDataOverrides.sz.customDataInterfaces.fundamental_data.baseUrl, 'https://ashare.example.com');
 });
+
+test('market data overrides provide full independent API settings per market', () => {
+  let configured = baseConfig();
+  configured = mapping.updateMarketDataVendor(configured, 'us', 'fundamental_data', 'custom', methods);
+  configured = mapping.updateMarketCustomDataBaseUrl(configured, 'us', 'fundamental_data', 'https://us-fundamentals.example.com');
+  configured = mapping.updateMarketToolVendor(configured, 'hk', 'get_news', 'longbridge_proxy', methods);
+  configured = mapping.updateMarketDataVendor(configured, 'sh', 'fundamental_data', 'a_share_fundamentals', methods);
+  configured = mapping.updateMarketCustomDataBaseUrl(configured, 'sh', 'fundamental_data', 'https://ashare.example.com');
+
+  const payload = mapping.configForBackend(configured, 'https://longbridge.example.com', methods, 'https://ashare.example.com');
+
+  assert.equal(payload.dataVendors.fundamental_data, 'yfinance');
+  assert.equal(payload.dataVendors.news_data, 'yfinance');
+  assert.equal(payload.customDataInterfaces.fundamental_data.baseUrl, null);
+  assert.equal(payload.marketDataOverrides.us.dataVendors.fundamental_data, 'custom');
+  assert.equal(payload.marketDataOverrides.us.customDataInterfaces.fundamental_data.baseUrl, 'https://us-fundamentals.example.com');
+  assert.equal(payload.marketDataOverrides.hk.toolVendors.get_news, 'custom');
+  assert.equal(payload.marketDataOverrides.hk.customDataInterfaces.news_data.baseUrl, 'https://longbridge.example.com');
+  assert.equal(payload.marketDataOverrides.sh.dataVendors.fundamental_data, 'custom');
+  assert.equal(payload.marketDataOverrides.sh.customDataInterfaces.fundamental_data.baseUrl, 'https://ashare.example.com');
+});

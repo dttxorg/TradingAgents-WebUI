@@ -59,10 +59,15 @@ import {
   isLongbridgeProxyBaseUrl,
   isLongbridgeProxyVendor,
   longbridgeProxyCategories,
+  marketDataOverride,
   normalizeDisplayVendor,
   setAshareFundamentalsMarkets,
   syncAshareFundamentalsBaseUrl,
   syncLongbridgeProxyBaseUrl,
+  updateMarketCustomDataBaseUrl,
+  updateMarketCustomDataEndpoint,
+  updateMarketDataVendor,
+  updateMarketToolVendor,
   vendorOptions,
 } from './configMapping';
 import './styles.css';
@@ -98,6 +103,9 @@ const messages = {
     pasteKey: 'Paste key',
     saveSecrets: 'Save secrets',
     dataVendors: 'Default data vendors',
+    marketDataVendors: 'Market data vendors',
+    marketDataHint: 'Each market can override the default data routes. Leave a field on inherit to use the default backend configuration.',
+    inheritDefault: 'Inherit default',
     analysisSetup: 'Analysis setup',
     ticker: 'Ticker',
     tickerList: 'Ticker list',
@@ -299,6 +307,9 @@ const messages = {
     pasteKey: '粘贴密钥',
     saveSecrets: '保存密钥',
     dataVendors: '默认数据源',
+    marketDataVendors: '市场数据源',
+    marketDataHint: '每个市场都可以覆盖默认数据路由；保持继承默认时，会继续使用后端默认配置。',
+    inheritDefault: '继承默认',
     analysisSetup: '分析配置',
     ticker: '股票代码',
     tickerList: '股票列表',
@@ -1021,6 +1032,45 @@ function App() {
     });
   }
 
+  function updateMarketVendor(market: string, category: string, value: string) {
+    if (!config) return;
+    const nextConfig = updateMarketDataVendor(config, market, category, value, metadata.customDataMethods);
+    if (isLongbridgeProxyVendor(value)) {
+      setConfig(syncLongbridgeProxyBaseUrl(nextConfig, longbridgeProxyBaseUrl, metadata.customDataMethods));
+    } else if (isAshareFundamentalsVendor(value)) {
+      setConfig(syncAshareFundamentalsBaseUrl(nextConfig, currentAshareFundamentalsBaseUrl, metadata.customDataMethods));
+    } else {
+      setConfig(nextConfig);
+    }
+  }
+
+  function updateMarketMethodVendor(market: string, method: string, value: string) {
+    if (!config) return;
+    const nextConfig = updateMarketToolVendor(config, market, method, value, metadata.customDataMethods);
+    if (isLongbridgeProxyVendor(value)) {
+      setConfig(syncLongbridgeProxyBaseUrl(nextConfig, longbridgeProxyBaseUrl, metadata.customDataMethods));
+    } else if (isAshareFundamentalsVendor(value)) {
+      setConfig(syncAshareFundamentalsBaseUrl(nextConfig, currentAshareFundamentalsBaseUrl, metadata.customDataMethods));
+    } else {
+      setConfig(nextConfig);
+    }
+  }
+
+  function updateMarketCustomBaseUrl(market: string, category: string, value: string) {
+    if (!config) return;
+    const nextConfig = updateMarketCustomDataBaseUrl(config, market, category, value);
+    setConfig(
+      isLongbridgeProxyBaseUrl(value, longbridgeProxyBaseUrl) || isLongbridgeProxyBaseUrl(value, currentAshareFundamentalsBaseUrl)
+        ? hydrateLongbridgeProxyConfig(nextConfig, longbridgeProxyBaseUrl, metadata.customDataMethods, currentAshareFundamentalsBaseUrl)
+        : nextConfig,
+    );
+  }
+
+  function updateMarketCustomEndpoint(market: string, category: string, method: string, value: string) {
+    if (!config) return;
+    setConfig(updateMarketCustomDataEndpoint(config, market, category, method, value));
+  }
+
   function updateBacktestConfig<K extends keyof BacktestScheduleConfig>(key: K, value: BacktestScheduleConfig[K]) {
     setBacktestConfig((current) => (current ? { ...current, [key]: value } : current));
   }
@@ -1311,7 +1361,11 @@ function App() {
   const configuredTickerCount = parseTickerList(tickerList || config.ticker).length || 1;
   const firstInputTicker = parseTickerList(tickerList || config.ticker)[0] ?? config.ticker;
   const effectiveTicker = formatMarketTicker(firstInputTicker, currentMarketProfile);
-  const customRouteCount = Object.keys(config.toolVendors ?? {}).length + Object.values(config.llmRoutes ?? {}).filter((route) => route.enabled).length;
+  const marketDataRouteCount = Object.values(config.marketDataOverrides ?? {}).reduce(
+    (total, override) => total + Object.keys(override.dataVendors ?? {}).length + Object.keys(override.toolVendors ?? {}).length,
+    0,
+  );
+  const customRouteCount = Object.keys(config.toolVendors ?? {}).length + marketDataRouteCount + Object.values(config.llmRoutes ?? {}).filter((route) => route.enabled).length;
   const displayedReports: ReportsPayload | null =
     selectedHistoryId && viewedArchive
       ? {
@@ -1675,36 +1729,6 @@ function App() {
                   />
                 </label>
               </details>
-              <details className="advanced-data-preset" open={hasAshareFundamentalsPreset}>
-                <summary>{t.ashareFundamentalsBaseUrl}</summary>
-                <p className="hint">{t.ashareFundamentalsHint}</p>
-                <label className="field">
-                  <span>{t.ashareFundamentalsUrlField}</span>
-                  <input
-                    value={currentAshareFundamentalsBaseUrl}
-                    onChange={(event) => updateAshareFundamentalsBaseUrl(event.target.value)}
-                    placeholder={ASHARE_FUNDAMENTALS_ENV || t.ashareFundamentalsPlaceholder}
-                  />
-                </label>
-                <div className="inline-toggle-grid">
-                  <label className="toggle-row compact-toggle">
-                    <input
-                      type="checkbox"
-                      checked={selectedAshareFundamentalsMarkets.has('sh')}
-                      onChange={(event) => toggleAshareFundamentalsMarket('sh', event.target.checked)}
-                    />
-                    <span>{t.ashareShanghai}</span>
-                  </label>
-                  <label className="toggle-row compact-toggle">
-                    <input
-                      type="checkbox"
-                      checked={selectedAshareFundamentalsMarkets.has('sz')}
-                      onChange={(event) => toggleAshareFundamentalsMarket('sz', event.target.checked)}
-                    />
-                    <span>{t.ashareShenzhen}</span>
-                  </label>
-                </div>
-              </details>
               <div className="custom-interface-list">
                 {metadata.dataVendorCategories.map((category) => {
                   const settings = config.customDataInterfaces[category.key] ?? { baseUrl: null, endpoints: {} };
@@ -2029,6 +2053,105 @@ function App() {
                         ))}
                       </select>
                     </label>
+                  );
+                })}
+              </div>
+            </Panel>
+
+            <Panel title={t.marketDataVendors} icon={<Database size={17} />}>
+              <p className="hint">{t.marketDataHint}</p>
+              <div className="market-data-list">
+                {metadata.stockMarkets.map((market) => {
+                  const override = marketDataOverride(config, market.key);
+                  const hasOverride =
+                    Object.keys(override.dataVendors ?? {}).length > 0 ||
+                    Object.keys(override.toolVendors ?? {}).length > 0 ||
+                    Object.keys(override.customDataInterfaces ?? {}).length > 0;
+                  return (
+                    <details key={market.key} className={hasOverride ? 'market-data-section active' : 'market-data-section'} open={market.key === config.stockMarket || hasOverride}>
+                      <summary>
+                        <span>{marketLabel(market.key, locale)}</span>
+                        <small>{hasOverride ? t.customInterfaces : t.inheritDefault}</small>
+                      </summary>
+                      <div className="market-data-body">
+                        {metadata.dataVendorCategories.map((category) => {
+                          const inherited = config.dataVendors[category.key] ?? '';
+                          return (
+                            <label key={`${market.key}-${category.key}`} className="field">
+                              <span>{dataVendorLabels[locale][category.key] ?? category.label}</span>
+                              <select value={override.dataVendors?.[category.key] ?? ''} onChange={(event) => updateMarketVendor(market.key, category.key, event.target.value)}>
+                                <option value="">{t.inheritDefault} ({dataVendorOptionLabel(inherited, locale)})</option>
+                                {vendorOptions(category.options, { category: category.key, market: market.key }).map((option) => (
+                                  <option key={option} value={option}>
+                                    {dataVendorOptionLabel(option, locale)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          );
+                        })}
+                        <div className="section-title">
+                          <ListOrdered size={16} />
+                          {t.methodOverrides}
+                        </div>
+                        <div className="method-vendor-list">
+                          {metadata.customDataMethods.map((method) => {
+                            const category = metadata.dataVendorCategories.find((item) => item.key === method.category);
+                            const inherited = override.dataVendors?.[method.category] ?? config.dataVendors[method.category] ?? '';
+                            return (
+                              <label key={`${market.key}-${method.method}`} className="field method-vendor-row">
+                                <span>
+                                  {customMethodLabels[locale][method.method] ?? method.label}
+                                  <small>{dataVendorLabels[locale][method.category] ?? category?.label ?? method.category}</small>
+                                </span>
+                                <select value={override.toolVendors?.[method.method] ?? ''} onChange={(event) => updateMarketMethodVendor(market.key, method.method, event.target.value)}>
+                                  <option value="">{t.inheritDefault} ({dataVendorOptionLabel(inherited, locale)})</option>
+                                  {vendorOptions(category?.options ?? [], { category: method.category, method: method.method, market: market.key }).map((option) => (
+                                    <option key={option} value={option}>
+                                      {dataVendorOptionLabel(option, locale)}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            );
+                          })}
+                        </div>
+                        <div className="custom-interface-list market-custom-interface-list">
+                          {metadata.dataVendorCategories.map((category) => {
+                            const methods = metadata.customDataMethods.filter((method) => method.category === category.key);
+                            const selectedCustom =
+                              isCustomLikeDataVendor(override.dataVendors?.[category.key]) ||
+                              methods.some((method) => isCustomLikeDataVendor(override.toolVendors?.[method.method]));
+                            if (!selectedCustom) return null;
+                            const settings = override.customDataInterfaces?.[category.key] ?? { baseUrl: null, endpoints: {} };
+                            return (
+                              <section key={`${market.key}-${category.key}-custom`} className="custom-interface active">
+                                <label className="field">
+                                  <span>{dataVendorLabels[locale][category.key] ?? category.label}</span>
+                                  <input
+                                    value={settings.baseUrl ?? ''}
+                                    onChange={(event) => updateMarketCustomBaseUrl(market.key, category.key, event.target.value)}
+                                    placeholder="https://data.example.com"
+                                  />
+                                </label>
+                                <div className="endpoint-grid">
+                                  {methods.map((method) => (
+                                    <label key={`${market.key}-${method.method}-endpoint`} className="field">
+                                      <span>{customMethodLabels[locale][method.method] ?? method.label}</span>
+                                      <input
+                                        value={settings.endpoints?.[method.method] ?? method.defaultPath}
+                                        onChange={(event) => updateMarketCustomEndpoint(market.key, category.key, method.method, event.target.value)}
+                                        placeholder={t.endpointPath}
+                                      />
+                                    </label>
+                                  ))}
+                                </div>
+                              </section>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </details>
                   );
                 })}
               </div>
@@ -2969,6 +3092,24 @@ function dataVendorOptionLabel(option: string, locale: Locale) {
   return option;
 }
 
+function marketLabel(key: string, locale: Locale) {
+  const labels: Record<Locale, Record<string, string>> = {
+    en: {
+      us: 'US stocks',
+      hk: 'Hong Kong stocks',
+      sh: 'Shanghai A shares',
+      sz: 'Shenzhen A shares',
+    },
+    zh: {
+      us: '美股',
+      hk: '港股',
+      sh: '上证 A 股',
+      sz: '深证 A 股',
+    },
+  };
+  return labels[locale][key] ?? key;
+}
+
 function isDeepSeekConfig(config: WebConfig, provider?: Metadata['providers'][number]) {
   const values = [
     config.llmProvider,
@@ -3026,7 +3167,15 @@ function buildSetupRecommendations(
   const items: string[] = [];
   const toolVendors = config.toolVendors ?? {};
   const methodCategory = Object.fromEntries(metadata.customDataMethods.map((method) => [method.method, method.category]));
-  const selectedVendors = [...Object.values(config.dataVendors), ...Object.values(toolVendors)];
+  const marketOverrides = config.marketDataOverrides ?? {};
+  const selectedVendors = [
+    ...Object.values(config.dataVendors),
+    ...Object.values(toolVendors),
+    ...Object.values(marketOverrides).flatMap((override) => [
+      ...Object.values(override.dataVendors ?? {}),
+      ...Object.values(override.toolVendors ?? {}),
+    ]),
+  ];
 
   if (provider?.apiKeyField && !secretStatus[provider.apiKeyField]?.configured) {
     items.push(locale === 'zh' ? `当前模型供应商需要配置 ${provider.apiKeyField}。` : `Configure ${provider.apiKeyField} for the selected LLM provider.`);
@@ -3051,6 +3200,14 @@ function buildSetupRecommendations(
   Object.entries(toolVendors).forEach(([method, vendor]) => {
     if (isCustomLikeDataVendor(vendor) && methodCategory[method]) customCategories.add(methodCategory[method]);
   });
+  Object.entries(marketOverrides).forEach(([market, override]) => {
+    Object.entries(override.dataVendors ?? {}).forEach(([category, vendor]) => {
+      if (isCustomLikeDataVendor(vendor)) customCategories.add(`${market}.${category}`);
+    });
+    Object.entries(override.toolVendors ?? {}).forEach(([method, vendor]) => {
+      if (isCustomLikeDataVendor(vendor) && methodCategory[method]) customCategories.add(`${market}.${methodCategory[method]}`);
+    });
+  });
 
   const directCustomCategories = new Set<string>();
   Object.entries(config.dataVendors).forEach(([category, vendor]) => {
@@ -3058,6 +3215,14 @@ function buildSetupRecommendations(
   });
   Object.entries(toolVendors).forEach(([method, vendor]) => {
     if (vendor === 'custom' && methodCategory[method]) directCustomCategories.add(methodCategory[method]);
+  });
+  Object.entries(marketOverrides).forEach(([market, override]) => {
+    Object.entries(override.dataVendors ?? {}).forEach(([category, vendor]) => {
+      if (vendor === 'custom') directCustomCategories.add(`${market}.${category}`);
+    });
+    Object.entries(override.toolVendors ?? {}).forEach(([method, vendor]) => {
+      if (vendor === 'custom' && methodCategory[method]) directCustomCategories.add(`${market}.${methodCategory[method]}`);
+    });
   });
 
   if (directCustomCategories.size > 0 && !secretStatus.CUSTOM_DATA_API_KEY?.configured) {
@@ -3075,12 +3240,20 @@ function buildSetupRecommendations(
       : 'A-share fundamentals preset is selected, but its Base URL is empty.');
   }
 
-  const missingCustomBase = [...customCategories].filter((category) => (
-    !longbridgeCategories.has(category) &&
-    !config.customDataInterfaces[category]?.baseUrl
-  ));
+  const missingCustomBase = [...customCategories].filter((category) => {
+    if (!category.includes('.')) {
+      return !longbridgeCategories.has(category) && !config.customDataInterfaces[category]?.baseUrl;
+    }
+    const [market, marketCategory] = category.split('.');
+    const marketVendor = marketOverrides[market]?.dataVendors?.[marketCategory];
+    return !isLongbridgeProxyVendor(marketVendor) && !marketOverrides[market]?.customDataInterfaces?.[marketCategory]?.baseUrl;
+  });
   if (missingCustomBase.length > 0) {
-    const names = missingCustomBase.map((category) => dataVendorLabels[locale][category] ?? category).join(', ');
+    const names = missingCustomBase.map((category) => {
+      if (!category.includes('.')) return dataVendorLabels[locale][category] ?? category;
+      const [market, marketCategory] = category.split('.');
+      return `${marketLabel(market, locale)} / ${dataVendorLabels[locale][marketCategory] ?? marketCategory}`;
+    }).join(', ');
     items.push(locale === 'zh' ? `这些 custom 数据分类还缺少 Base URL：${names}。` : `Custom data Base URL is missing for: ${names}.`);
   }
 

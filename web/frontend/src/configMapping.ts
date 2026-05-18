@@ -99,12 +99,123 @@ function marketOverride(config: WebConfig, market: string) {
   };
 }
 
-function setMarketOverride(config: WebConfig, market: string, override: WebConfig['marketDataOverrides'][string]) {
+export function marketDataOverride(config: WebConfig, market: string) {
+  return marketOverride(config, market);
+}
+
+function cleanMarketOverride(override: WebConfig['marketDataOverrides'][string]) {
+  return {
+    dataVendors: Object.fromEntries(Object.entries(override.dataVendors ?? {}).filter(([, vendor]) => Boolean(vendor))),
+    toolVendors: Object.fromEntries(Object.entries(override.toolVendors ?? {}).filter(([, vendor]) => Boolean(vendor))),
+    customDataInterfaces: Object.fromEntries(
+      Object.entries(override.customDataInterfaces ?? {}).filter(([, settings]) => (
+        Boolean(settings.baseUrl) || Object.keys(settings.endpoints ?? {}).length > 0
+      )),
+    ),
+  };
+}
+
+export function setMarketOverride(config: WebConfig, market: string, override: WebConfig['marketDataOverrides'][string]) {
   const nextOverrides = {
     ...(config.marketDataOverrides ?? {}),
-    [market]: override,
+    [market]: cleanMarketOverride(override),
   };
   return { ...config, marketDataOverrides: pruneMarketDataOverrides(nextOverrides) };
+}
+
+function marketInterfaceWithDefaults(
+  config: WebConfig,
+  market: string,
+  category: string,
+  methods: Metadata['customDataMethods'],
+) {
+  const override = marketOverride(config, market);
+  const current = override.customDataInterfaces?.[category] ?? { baseUrl: null, endpoints: {} };
+  return {
+    ...current,
+    endpoints: {
+      ...defaultEndpointsForCategory(category, methods),
+      ...(current.endpoints ?? {}),
+    },
+  };
+}
+
+export function updateMarketDataVendor(
+  config: WebConfig,
+  market: string,
+  category: string,
+  vendor: string,
+  methods: Metadata['customDataMethods'],
+) {
+  const override = marketOverride(config, market);
+  const dataVendors = { ...(override.dataVendors ?? {}) };
+  const customDataInterfaces = { ...(override.customDataInterfaces ?? {}) };
+  if (!vendor) {
+    delete dataVendors[category];
+  } else {
+    dataVendors[category] = normalizeDisplayVendor(vendor);
+    if (isCustomLikeDataVendor(vendor)) {
+      customDataInterfaces[category] = marketInterfaceWithDefaults(config, market, category, methods);
+    }
+  }
+  return setMarketOverride(config, market, {
+    ...override,
+    dataVendors,
+    customDataInterfaces,
+  });
+}
+
+export function updateMarketToolVendor(
+  config: WebConfig,
+  market: string,
+  method: string,
+  vendor: string,
+  methods: Metadata['customDataMethods'],
+) {
+  const override = marketOverride(config, market);
+  const toolVendors = { ...(override.toolVendors ?? {}) };
+  const customDataInterfaces = { ...(override.customDataInterfaces ?? {}) };
+  const category = methodCategoryMap(methods)[method];
+  if (!vendor) {
+    delete toolVendors[method];
+  } else {
+    toolVendors[method] = normalizeDisplayVendor(vendor);
+    if (category && isCustomLikeDataVendor(vendor)) {
+      customDataInterfaces[category] = marketInterfaceWithDefaults(config, market, category, methods);
+    }
+  }
+  return setMarketOverride(config, market, {
+    ...override,
+    toolVendors,
+    customDataInterfaces,
+  });
+}
+
+export function updateMarketCustomDataBaseUrl(config: WebConfig, market: string, category: string, value: string) {
+  const override = marketOverride(config, market);
+  const current = override.customDataInterfaces?.[category] ?? { baseUrl: null, endpoints: {} };
+  return setMarketOverride(config, market, {
+    ...override,
+    customDataInterfaces: {
+      ...(override.customDataInterfaces ?? {}),
+      [category]: { ...current, baseUrl: value || null },
+    },
+  });
+}
+
+export function updateMarketCustomDataEndpoint(config: WebConfig, market: string, category: string, method: string, value: string) {
+  const override = marketOverride(config, market);
+  const current = override.customDataInterfaces?.[category] ?? { baseUrl: null, endpoints: {} };
+  return setMarketOverride(config, market, {
+    ...override,
+    customDataInterfaces: {
+      ...(override.customDataInterfaces ?? {}),
+      [category]: {
+        ...current,
+        endpoints: { ...(current.endpoints ?? {}), [method]: value },
+      },
+    },
+  });
 }
 
 export function effectiveMarketDataVendors(config: WebConfig, market = config.stockMarket) {
@@ -130,6 +241,15 @@ export function longbridgeProxyCategories(config: WebConfig, methods: Metadata['
   Object.entries(config.toolVendors ?? {}).forEach(([method, vendor]) => {
     const category = methodCategory[method];
     if (isLongbridgeProxyVendor(vendor) && category) categories.add(category);
+  });
+  Object.values(config.marketDataOverrides ?? {}).forEach((override) => {
+    Object.entries(override.dataVendors ?? {}).forEach(([category, vendor]) => {
+      if (isLongbridgeProxyVendor(vendor)) categories.add(category);
+    });
+    Object.entries(override.toolVendors ?? {}).forEach(([method, vendor]) => {
+      const category = methodCategory[method];
+      if (isLongbridgeProxyVendor(vendor) && category) categories.add(category);
+    });
   });
   return categories;
 }
@@ -189,20 +309,51 @@ export function ashareFundamentalsBaseUrlFromConfig(config: WebConfig) {
 
 export function syncLongbridgeProxyBaseUrl(config: WebConfig, baseUrl: string, methods: Metadata['customDataMethods']) {
   const categories = longbridgeProxyCategories(config, methods);
+  const marketOverrides = config.marketDataOverrides ?? {};
+  const methodCategory = methodCategoryMap(methods);
   if (categories.size === 0) return config;
   const nextInterfaces = { ...config.customDataInterfaces };
-  categories.forEach((category) => {
+  Object.entries(config.dataVendors).forEach(([category, vendor]) => {
+    if (!isLongbridgeProxyVendor(vendor)) return;
     const current = nextInterfaces[category] ?? { baseUrl: null, endpoints: {} };
-    nextInterfaces[category] = {
-      ...current,
-      baseUrl: baseUrl.trim() || null,
-      endpoints: {
-        ...defaultEndpointsForCategory(category, methods),
-        ...current.endpoints,
-      },
-    };
+    nextInterfaces[category] = { ...current, baseUrl: baseUrl.trim() || null, endpoints: { ...defaultEndpointsForCategory(category, methods), ...current.endpoints } };
   });
-  return { ...config, customDataInterfaces: nextInterfaces };
+  Object.entries(config.toolVendors ?? {}).forEach(([method, vendor]) => {
+    const category = methodCategory[method];
+    if (!category || !isLongbridgeProxyVendor(vendor)) return;
+    const current = nextInterfaces[category] ?? { baseUrl: null, endpoints: {} };
+    nextInterfaces[category] = { ...current, baseUrl: baseUrl.trim() || null, endpoints: { ...defaultEndpointsForCategory(category, methods), ...current.endpoints } };
+  });
+
+  let nextConfig = { ...config, customDataInterfaces: nextInterfaces };
+  Object.entries(marketOverrides).forEach(([market, override]) => {
+    const marketCategories = new Set<string>();
+    Object.entries(override.dataVendors ?? {}).forEach(([category, vendor]) => {
+      if (isLongbridgeProxyVendor(vendor)) marketCategories.add(category);
+    });
+    Object.entries(override.toolVendors ?? {}).forEach(([method, vendor]) => {
+      const category = methodCategory[method];
+      if (category && isLongbridgeProxyVendor(vendor)) marketCategories.add(category);
+    });
+    if (marketCategories.size === 0) return;
+    const customDataInterfaces = { ...(override.customDataInterfaces ?? {}) };
+    marketCategories.forEach((category) => {
+      const current = customDataInterfaces[category] ?? { baseUrl: null, endpoints: {} };
+      customDataInterfaces[category] = {
+        ...current,
+        baseUrl: baseUrl.trim() || null,
+        endpoints: {
+          ...defaultEndpointsForCategory(category, methods),
+          ...(current.endpoints ?? {}),
+        },
+      };
+    });
+    nextConfig = setMarketOverride(nextConfig, market, {
+      ...override,
+      customDataInterfaces,
+    });
+  });
+  return nextConfig;
 }
 
 export function syncAshareFundamentalsBaseUrl(config: WebConfig, baseUrl: string, methods: Metadata['customDataMethods']) {

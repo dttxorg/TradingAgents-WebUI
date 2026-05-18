@@ -79,6 +79,24 @@ def test_backend_keeps_longbridge_as_frontend_only_data_preset():
 
 def test_market_data_overrides_apply_only_to_selected_market(tmp_path):
     market_overrides = {
+        "us": {
+            "dataVendors": {"fundamental_data": CUSTOM_DATA_VENDOR},
+            "customDataInterfaces": {
+                "fundamental_data": {
+                    "baseUrl": "https://us-fundamentals.example.com/api",
+                    "endpoints": {"get_fundamentals": "/fundamentals"},
+                }
+            },
+        },
+        "hk": {
+            "toolVendors": {"get_news": CUSTOM_DATA_VENDOR},
+            "customDataInterfaces": {
+                "news_data": {
+                    "baseUrl": "https://hk-news.example.com/api",
+                    "endpoints": {"get_news": "/news"},
+                }
+            },
+        },
         "sh": {
             "dataVendors": {"fundamental_data": CUSTOM_DATA_VENDOR},
             "toolVendors": {
@@ -101,6 +119,7 @@ def test_market_data_overrides_apply_only_to_selected_market(tmp_path):
         }
     }
     us_config = WebConfig(stockMarket="us", marketDataOverrides=market_overrides)
+    hk_config = WebConfig(stockMarket="hk", marketDataOverrides=market_overrides)
     sh_config = WebConfig(stockMarket="sh", marketDataOverrides=market_overrides)
     storage = WebStorage(tmp_path)
 
@@ -108,10 +127,15 @@ def test_market_data_overrides_apply_only_to_selected_market(tmp_path):
     assert us_config.market_data_overrides["sh"].data_vendors["fundamental_data"] == CUSTOM_DATA_VENDOR
 
     us_runtime = storage.runtime_config(us_config)
+    hk_runtime = storage.runtime_config(hk_config)
     sh_runtime = storage.runtime_config(sh_config)
 
-    assert us_runtime["data_vendors"]["fundamental_data"] == "yfinance"
-    assert us_runtime["custom_data_interfaces"]["fundamental_data"]["baseUrl"] is None
+    assert us_runtime["data_vendors"]["fundamental_data"] == CUSTOM_DATA_VENDOR
+    assert us_runtime["custom_data_interfaces"]["fundamental_data"]["baseUrl"] == "https://us-fundamentals.example.com/api"
+    assert "get_news" not in us_runtime["tool_vendors"]
+    assert hk_runtime["data_vendors"]["fundamental_data"] == "yfinance"
+    assert hk_runtime["tool_vendors"]["get_news"] == CUSTOM_DATA_VENDOR
+    assert hk_runtime["custom_data_interfaces"]["news_data"]["baseUrl"] == "https://hk-news.example.com/api"
     assert sh_runtime["data_vendors"]["fundamental_data"] == CUSTOM_DATA_VENDOR
     assert sh_runtime["tool_vendors"]["get_income_statement"] == CUSTOM_DATA_VENDOR
     assert sh_runtime["custom_data_interfaces"]["fundamental_data"]["baseUrl"] == "https://ashare.example.com/api"
