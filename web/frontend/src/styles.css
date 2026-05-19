@@ -503,14 +503,46 @@ h2 {
 .panel-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   color: #eef5f4;
   margin-bottom: 13px;
 }
 
-.panel-header span {
+.panel-title {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-title span {
   display: inline-flex;
   color: #83e4b9;
+}
+
+.panel-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-button {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #2a3b40;
+  background: #10181b;
+  color: #dce5e6;
+  border-radius: 8px;
+  padding: 0;
+}
+
+.icon-button:hover {
+  border-color: #4c8e77;
+  color: #f2fffb;
 }
 
 .form-grid,
@@ -1311,9 +1343,89 @@ textarea {
   white-space: nowrap;
 }
 
+.report-panel {
+  min-height: 720px;
+}
+
+.report-reader {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+}
+
+.report-nav {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  max-height: 690px;
+  overflow: auto;
+  border: 1px solid #25373c;
+  background: #0c1215;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.report-nav button {
+  min-height: 36px;
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #b9c5c7;
+  border-radius: 7px;
+  padding: 0 10px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 730;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.report-nav button.active {
+  border-color: #83e4b9;
+  background: #14342d;
+  color: #f2fffb;
+}
+
+.report-reader-main {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+}
+
+.report-toolbar {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #25373c;
+  background: #10181b;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.report-toolbar span {
+  color: #8fa0a2;
+  font-size: 11px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.report-toolbar strong {
+  min-width: 0;
+  color: #eef5f4;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .report-view {
-  min-height: 440px;
-  max-height: 620px;
+  min-height: 620px;
+  max-height: min(76vh, 860px);
   overflow: auto;
   border: 1px solid #25373c;
   background: #0c1215;
@@ -1327,7 +1439,72 @@ textarea {
   overflow-wrap: anywhere;
   color: #d8e1e2;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.reader-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(5, 8, 10, 0.76);
+  backdrop-filter: blur(8px);
+}
+
+.reader-modal {
+  width: min(1380px, 100%);
+  max-height: calc(100vh - 36px);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 12px;
+  overflow: hidden;
+  border: 1px solid #2f464d;
+  background: #0e1518;
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.reader-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.reader-modal-header > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.reader-modal-header span {
+  color: #83e4b9;
   font-size: 12px;
+  font-weight: 760;
+}
+
+.reader-modal-header strong {
+  color: #eef5f4;
+  font-size: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reader-modal .report-reader {
+  min-height: 0;
+}
+
+.reader-modal .report-nav {
+  max-height: none;
+}
+
+.reader-modal .report-view {
+  min-height: 0;
+  max-height: none;
 }
 
 .observation-view {
@@ -1575,6 +1752,10 @@ textarea {
     grid-column: 1 / -1;
     grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
   }
+
+  .report-reader {
+    grid-template-columns: 180px minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 860px) {
@@ -1589,6 +1770,7 @@ textarea {
 
   .workspace-grid,
   .right-rail,
+  .report-reader,
   .settings-grid {
     grid-template-columns: 1fr;
   }
@@ -1621,6 +1803,42 @@ textarea {
 
   .new-user-grid button {
     grid-column: span 1;
+  }
+
+  .report-panel {
+    min-height: 0;
+  }
+
+  .report-context,
+  .report-toolbar,
+  .reader-modal-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .report-nav {
+    display: flex;
+    max-height: none;
+    overflow-x: auto;
+  }
+
+  .report-nav button {
+    width: auto;
+    flex: 0 0 auto;
+  }
+
+  .report-view {
+    min-height: 520px;
+    max-height: 70vh;
+  }
+
+  .reader-overlay {
+    padding: 8px;
+  }
+
+  .reader-modal {
+    max-height: calc(100vh - 16px);
+    padding: 10px;
   }
 
   .ticker-list-field {

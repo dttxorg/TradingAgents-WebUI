@@ -34,6 +34,7 @@ from .custom_data import configure_custom_data_interfaces
 from .llm_options import patched_tradingagents_llm_client_factory
 from .llm_routing import parallel_initial_analyst_workflow, has_enabled_llm_routes, routed_workflow
 from .markets import apply_market_profile, format_market_ticker, market_profile_prompt
+from .reference_reviewers import run_reference_reviews
 from .schemas import BatchRunRequest, RunBilling, RunInfo, RunReports, RunRequest, UserPublic, WebConfig
 from .storage import WebStorage
 
@@ -71,6 +72,8 @@ REPORT_TITLES = {
         "investment_plan": "Research Team Decision",
         "trader_investment_plan": "Trading Team Plan",
         "final_trade_decision": "Portfolio Manager Decision",
+        "buffett_review": "Buffett Reference Review",
+        "munger_review": "Munger Reference Review",
         "investment_debate_state": "Investment Debate",
         "risk_debate_state": "Risk Debate",
     },
@@ -83,6 +86,8 @@ REPORT_TITLES = {
         "investment_plan": "研究团队结论",
         "trader_investment_plan": "交易团队计划",
         "final_trade_decision": "组合经理决策",
+        "buffett_review": "巴菲特视角参考",
+        "munger_review": "芒格视角参考",
         "investment_debate_state": "投资辩论",
         "risk_debate_state": "风险辩论",
     },
@@ -463,6 +468,14 @@ class RunManager:
             final_state = trace[-1]
             decision_text = final_state.get("final_trade_decision", "")
             run.decision = graph.process_signal(decision_text) if decision_text else None
+            final_state = {
+                **final_state,
+                **run_reference_reviews(
+                    getattr(graph, "deep_thinking_llm", None),
+                    final_state,
+                    run.config.output_language,
+                ),
+            }
 
             graph.curr_state = final_state
             graph.ticker = run.request.ticker
@@ -668,6 +681,10 @@ class RunManager:
             reports["risk_debate_state"] = state["risk_debate_state"]
         if state.get("final_trade_decision"):
             reports["final_trade_decision"] = state["final_trade_decision"]
+        if state.get("buffett_review"):
+            reports["buffett_review"] = state["buffett_review"]
+        if state.get("munger_review"):
+            reports["munger_review"] = state["munger_review"]
         return reports
 
     def _complete_report(self, ticker: str, reports: dict[str, Any], output_language: str) -> str:

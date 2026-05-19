@@ -20,6 +20,9 @@ dependencies = [
 [tool.setuptools.packages.find]
 include = ["web*"]
 
+[tool.setuptools.package-data]
+web = ["skills/*/*.md", "skills/*.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"

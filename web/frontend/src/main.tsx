@@ -19,6 +19,7 @@ import {
   ListOrdered,
   LogIn,
   Loader2,
+  Maximize2,
   Play,
   RefreshCw,
   ReceiptText,
@@ -30,6 +31,7 @@ import {
   UserPlus,
   Users,
   Wallet,
+  X,
 } from 'lucide-react';
 import { api } from './api';
 import type {
@@ -191,6 +193,10 @@ const messages = {
     baseUrlRequired: 'Base URL for selected custom data categories',
     reports: 'Reports',
     final: 'Final',
+    openReportReader: 'Open reader',
+    closeReportReader: 'Close reader',
+    currentSection: 'Current section',
+    noReportLoaded: 'No report loaded',
     backtestWatch: 'Backtest watch',
     backtestSchedule: 'Backtest schedule',
     backtestNoReport: 'No report content to observe yet.',
@@ -395,6 +401,10 @@ const messages = {
     baseUrlRequired: '已选择 custom 的数据分类需要填写 Base URL',
     reports: '报告',
     final: '最终报告',
+    openReportReader: '打开阅读器',
+    closeReportReader: '关闭阅读器',
+    currentSection: '当前章节',
+    noReportLoaded: '暂无报告内容',
     backtestWatch: '回测观察',
     backtestSchedule: '复盘周期',
     backtestNoReport: '暂无可复盘的报告内容。',
@@ -549,6 +559,8 @@ const reportLabels: Record<Locale, Record<string, string>> = {
     trader_investment_plan: '交易计划',
     risk_debate_state: '风险辩论',
     final_trade_decision: '最终交易决策',
+    buffett_review: '巴菲特视角参考',
+    munger_review: '芒格视角参考',
   },
 };
 
@@ -640,6 +652,7 @@ function App() {
   const [history, setHistory] = useState<ReportHistoryItem[]>([]);
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
   const [reportTab, setReportTab] = useState('finalReport');
+  const [isReaderOpen, setReaderOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [isSaving, setSaving] = useState(false);
@@ -764,6 +777,15 @@ function App() {
       cancelled = true;
     };
   }, [currentUser?.id, activeRun?.id, activeRun?.status, activeRun?.ticker, viewedArchive?.run.id, viewedArchive?.run.ticker]);
+
+  useEffect(() => {
+    if (!isReaderOpen) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setReaderOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isReaderOpen]);
 
   function changeLocale(value: Locale) {
     setLocale(value);
@@ -1379,6 +1401,65 @@ function App() {
   const runBilling = displayedRun?.billing ?? activeRun?.billing ?? null;
   const reportEntries = displayedReports?.reports ? Object.entries(displayedReports.reports) : [];
   const backtestObservation = buildBacktestObservation(displayedReports, displayedRun, outputLocale);
+  const reportTabs = [
+    { key: 'finalReport', label: t.final },
+    { key: 'backtestWatch', label: t.backtestWatch },
+    ...reportEntries.map(([key]) => ({ key, label: reportLabels[locale][key] ?? cleanLabel(key) })),
+  ];
+  const activeReportTitle = reportTabs.find((item) => item.key === reportTab)?.label ?? t.noReportLoaded;
+  const reportContext = displayedReports ? (
+    <div className="report-context">
+      <strong>
+        {displayedRun?.ticker ?? displayedReports.runId.slice(0, 8)} · {displayedRun?.analysisDate ?? displayedReports.runId.slice(0, 8)}
+      </strong>
+      <span>{selectedHistoryId ? t.archivedReport : t.currentReport}</span>
+      {selectedHistoryId && (reports || activeRun) && (
+        <button className="text-button" onClick={showCurrentRun}>
+          {t.showCurrentRun}
+        </button>
+      )}
+    </div>
+  ) : null;
+  const renderReportBody = () => (
+    <article className="report-view">
+      {reportTab === 'backtestWatch' ? (
+        <BacktestObservationView
+          observation={backtestObservation}
+          record={backtestRecord}
+          summary={backtestSummary}
+          labels={t}
+          locale={outputLocale}
+          onRun={runDisplayedBacktest}
+          isRunning={isBacktestRunning}
+        />
+      ) : (
+        <pre>{reportTab === 'finalReport' ? displayedReports?.finalReport ?? t.noReport : stringifyReport(displayedReports?.reports?.[reportTab], t.noReport)}</pre>
+      )}
+    </article>
+  );
+  const renderReportReader = () => (
+    <div className="report-reader">
+      <nav className="report-nav" aria-label={t.currentSection}>
+        {reportTabs.map((item) => (
+          <button
+            key={item.key}
+            className={reportTab === item.key ? 'active' : ''}
+            onClick={() => setReportTab(item.key)}
+            aria-current={reportTab === item.key ? 'page' : undefined}
+          >
+            {item.label}
+          </button>
+        ))}
+      </nav>
+      <div className="report-reader-main">
+        <div className="report-toolbar">
+          <span>{t.currentSection}</span>
+          <strong>{activeReportTitle}</strong>
+        </div>
+        {renderReportBody()}
+      </div>
+    </div>
+  );
 
   return (
     <main className="app-shell" lang={locale === 'zh' ? 'zh-CN' : 'en'}>
@@ -2409,6 +2490,20 @@ function App() {
             </div>
           </Panel>
 
+          <Panel
+            title={t.reports}
+            icon={<Server size={17} />}
+            className="report-panel"
+            actions={
+              <button className="icon-button" onClick={() => setReaderOpen(true)} aria-label={t.openReportReader} title={t.openReportReader}>
+                <Maximize2 size={16} />
+              </button>
+            }
+          >
+            {reportContext}
+            {renderReportReader()}
+          </Panel>
+
         </section>
 
         <aside className="right-rail">
@@ -2464,50 +2559,24 @@ function App() {
             </div>
           </Panel>
 
-          <Panel title={t.reports} icon={<Server size={17} />}>
-            {displayedReports && (
-              <div className="report-context">
-                <strong>
-                  {displayedRun?.ticker ?? displayedReports.runId.slice(0, 8)} · {displayedRun?.analysisDate ?? displayedReports.runId.slice(0, 8)}
-                </strong>
-                <span>{selectedHistoryId ? t.archivedReport : t.currentReport}</span>
-                {selectedHistoryId && (reports || activeRun) && (
-                  <button className="text-button" onClick={showCurrentRun}>
-                    {t.showCurrentRun}
-                  </button>
-                )}
-              </div>
-            )}
-            <div className="tabs">
-              <button className={reportTab === 'finalReport' ? 'active' : ''} onClick={() => setReportTab('finalReport')}>
-                {t.final}
-              </button>
-              <button className={reportTab === 'backtestWatch' ? 'active' : ''} onClick={() => setReportTab('backtestWatch')}>
-                {t.backtestWatch}
-              </button>
-              {reportEntries.map(([key]) => (
-                <button key={key} className={reportTab === key ? 'active' : ''} onClick={() => setReportTab(key)}>
-                  {reportLabels[locale][key] ?? cleanLabel(key)}
-                </button>
-              ))}
-            </div>
-            <article className="report-view">
-              {reportTab === 'backtestWatch' ? (
-                <BacktestObservationView
-                  observation={backtestObservation}
-                  record={backtestRecord}
-                  summary={backtestSummary}
-                  labels={t}
-                  locale={outputLocale}
-                  onRun={runDisplayedBacktest}
-                  isRunning={isBacktestRunning}
-                />
-              ) : (
-                <pre>{reportTab === 'finalReport' ? displayedReports?.finalReport ?? t.noReport : stringifyReport(displayedReports?.reports?.[reportTab], t.noReport)}</pre>
-              )}
-            </article>
-          </Panel>
         </aside>
+        {isReaderOpen && (
+          <div className="reader-overlay" role="dialog" aria-modal="true" aria-label={t.reports}>
+            <section className="reader-modal">
+              <div className="reader-modal-header">
+                <div>
+                  <span>{t.reports}</span>
+                  <strong>{activeReportTitle}</strong>
+                </div>
+                <button className="icon-button" onClick={() => setReaderOpen(false)} aria-label={t.closeReportReader} title={t.closeReportReader}>
+                  <X size={17} />
+                </button>
+              </div>
+              {reportContext}
+              {renderReportReader()}
+            </section>
+          </div>
+        )}
         </section>
       )}
     </main>
@@ -2619,12 +2688,27 @@ function AuthScreen({
   );
 }
 
-function Panel({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
+function Panel({
+  title,
+  icon,
+  actions,
+  className,
+  children,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  actions?: React.ReactNode;
+  className?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <section className="panel">
+    <section className={className ? `panel ${className}` : 'panel'}>
       <div className="panel-header">
-        <span>{icon}</span>
-        <h2>{title}</h2>
+        <div className="panel-title">
+          <span>{icon}</span>
+          <h2>{title}</h2>
+        </div>
+        {actions && <div className="panel-actions">{actions}</div>}
       </div>
       {children}
     </section>
