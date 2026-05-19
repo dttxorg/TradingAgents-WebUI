@@ -648,6 +648,28 @@ textarea {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 150px;
 }
 
+.settings-thinking-row {
+  display: grid;
+  grid-template-columns: minmax(190px, 260px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  margin-top: 12px;
+}
+
+.inline-hint {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  margin: 0;
+  border: 1px solid #25373c;
+  background: #10181b;
+  color: #8fa0a2;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .billing-form {
   display: grid;
   gap: 12px;
@@ -995,6 +1017,26 @@ textarea {
   gap: 10px;
 }
 
+.data-secret-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #25373c;
+  background: #0c1215;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 12px;
+}
+
+.data-secret-card .section-title {
+  margin: 0;
+}
+
+.data-secret-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .market-data-section {
   border: 1px solid #25373c;
   border-radius: 8px;
@@ -1028,6 +1070,41 @@ textarea {
   margin-top: 10px;
 }
 
+.market-category-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.market-route-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #25373c;
+  background: #10181b;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.market-route-card.active {
+  border-color: #4c8e77;
+  background: #0f1c1a;
+}
+
+.market-route-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.9fr);
+  gap: 10px;
+  align-items: end;
+}
+
+.market-route-head > .field:only-child {
+  max-width: 520px;
+}
+
+.market-method-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .market-custom-interface-list:empty {
   display: none;
 }
@@ -1046,6 +1123,10 @@ textarea {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin-top: 10px;
+}
+
+.market-endpoint-grid {
+  margin-top: 0;
 }
 
 .secret-row {
@@ -1781,7 +1862,9 @@ textarea {
   .tool-row.single-control,
   .settings-form,
   .settings-model-row,
+  .settings-thinking-row,
   .billing-grid,
+  .data-secret-grid,
   .depth-price-card,
   .new-user-grid,
   .agent-grid,
@@ -1791,6 +1874,8 @@ textarea {
   .route-fields,
   .market-profile-grid,
   .market-profile-fields,
+  .market-route-head,
+  .market-method-list,
   .observation-grid,
   .backtest-settings-grid,
   .backtest-summary-grid,

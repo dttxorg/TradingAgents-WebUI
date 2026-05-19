@@ -107,6 +107,7 @@ const messages = {
     marketDataVendors: 'Market data vendors',
     marketDataHint: 'Each market can override the default data routes. Leave a field on inherit to use the default backend configuration.',
     marketOverrideConfigured: 'Market routes configured',
+    dataApiKeys: 'Data API keys',
     inheritDefault: 'Inherit default',
     analysisSetup: 'Analysis setup',
     ticker: 'Ticker',
@@ -303,6 +304,7 @@ const messages = {
     marketDataVendors: '市场数据源',
     marketDataHint: '每个市场都可以覆盖默认数据路由；保持继承默认时，会继续使用后端默认配置。',
     marketOverrideConfigured: '已配置市场数据源',
+    dataApiKeys: '数据源 API 密钥',
     inheritDefault: '继承默认',
     analysisSetup: '分析配置',
     ticker: '股票代码',
@@ -1376,6 +1378,7 @@ function App() {
   const runBilling = displayedRun?.billing ?? activeRun?.billing ?? null;
   const reportEntries = displayedReports?.reports ? Object.entries(displayedReports.reports) : [];
   const backtestObservation = buildBacktestObservation(displayedReports, displayedRun, outputLocale);
+  const dataApiSecretFields = metadata.secretFields.filter((field) => ['ALPHA_VANTAGE_API_KEY', 'CUSTOM_DATA_API_KEY'].includes(field));
   const reportTabs = [
     { key: 'finalReport', label: t.final },
     { key: 'backtestWatch', label: t.backtestWatch },
@@ -1606,7 +1609,7 @@ function App() {
                 <p className="hint">{discoveredModels[config.llmProvider].length} {t.fetchedModels}</p>
               )}
               {showDeepSeekThinkingMode && (
-                <div className="form-grid settings-form">
+                <div className="settings-thinking-row">
                   <label className="field">
                     <span>{t.deepseekThinkingMode}</span>
                     <select
@@ -1620,7 +1623,7 @@ function App() {
                       ))}
                     </select>
                   </label>
-                  <p className="hint">{t.deepseekThinkingHint}</p>
+                  <p className="inline-hint">{t.deepseekThinkingHint}</p>
                 </div>
               )}
 
@@ -1717,6 +1720,167 @@ function App() {
                   <Save size={16} />
                   {t.saveDefaults}
                 </button>
+              </div>
+            </Panel>
+
+            <Panel title={t.dataVendors} icon={<Database size={17} />}>
+              {metadata.dataVendorCategories.map((category) => (
+                <label key={category.key} className="field">
+                  <span>{dataVendorLabels[locale][category.key] ?? category.label}</span>
+                  <select value={config.dataVendors[category.key] ?? ''} onChange={(event) => updateVendor(category.key, event.target.value)}>
+                    {category.options.filter((option) => option !== 'custom').map((option) => (
+                      <option key={option} value={option}>
+                        {dataVendorOptionLabel(option, locale)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+              <div className="section-title">
+                <ListOrdered size={16} />
+                {t.methodOverrides}
+              </div>
+              <div className="method-vendor-list">
+                {metadata.customDataMethods.map((method) => {
+                  const category = metadata.dataVendorCategories.find((item) => item.key === method.category);
+                  const categoryVendor = config.dataVendors[method.category] ?? '';
+                  return (
+                    <label key={method.method} className="field method-vendor-row">
+                      <span>
+                        {customMethodLabels[locale][method.method] ?? method.label}
+                        <small>{dataVendorLabels[locale][method.category] ?? category?.label ?? method.category}</small>
+                      </span>
+                      <select value={(config.toolVendors ?? {})[method.method] ?? ''} onChange={(event) => updateToolVendor(method.method, event.target.value)}>
+                        <option value="">{t.useCategoryDefault} ({dataVendorOptionLabel(categoryVendor, locale)})</option>
+                        {(category?.options ?? []).filter((option) => option !== 'custom').map((option) => (
+                          <option key={option} value={option}>
+                            {dataVendorOptionLabel(option, locale)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  );
+                })}
+              </div>
+            </Panel>
+
+            <Panel title={t.marketDataVendors} icon={<Database size={17} />}>
+              <p className="hint">{t.marketDataHint}</p>
+              {dataApiSecretFields.length > 0 && (
+                <section className="data-secret-card">
+                  <div className="section-title">
+                    <KeyRound size={16} />
+                    {t.dataApiKeys}
+                  </div>
+                  <div className="data-secret-grid">
+                    {dataApiSecretFields.map((field) => (
+                      <label key={field} className="secret-row">
+                        <span>
+                          {field}
+                          <small>{secretStatus[field]?.configured ? secretStatus[field]?.masked : t.notConfigured}</small>
+                        </span>
+                        <input
+                          type="password"
+                          autoComplete="off"
+                          placeholder={secretStatus[field]?.configured ? t.replaceValue : t.pasteKey}
+                          value={secretDraft[field] ?? ''}
+                          onChange={(event) => setSecretDraft((current) => ({ ...current, [field]: event.target.value }))}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                  <button className="secondary" onClick={saveSecrets} disabled={isSaving}>
+                    <Save size={16} />
+                    {t.saveSecrets}
+                  </button>
+                </section>
+              )}
+              <div className="market-data-list">
+                {marketDataSections.map((section) => {
+                  const hasOverride = marketGroupHasOverride(section.markets);
+                  const sectionMarket = section.markets[0];
+                  return (
+                    <details key={section.key} className={hasOverride ? 'market-data-section active' : 'market-data-section'} open={section.markets.includes(config.stockMarket) || hasOverride}>
+                      <summary>
+                        <span>{section.label}</span>
+                        <small>{hasOverride ? t.marketOverrideConfigured : t.inheritDefault}</small>
+                      </summary>
+                      <div className="market-category-list">
+                        {metadata.dataVendorCategories.map((category) => {
+                          const methods = metadata.customDataMethods.filter((method) => method.category === category.key);
+                          const inherited = config.dataVendors[category.key] ?? '';
+                          const value = sharedMarketValue(section.markets, (market) => marketDataOverride(config, market).dataVendors?.[category.key]);
+                          const selectedCustom = marketGroupUsesCustomRoute(section.markets, category.key, methods);
+                          const settings = marketGroupCustomSettings(section.markets, category.key);
+                          return (
+                            <section key={`${section.key}-${category.key}`} className={selectedCustom ? 'market-route-card active' : 'market-route-card'}>
+                              <div className="market-route-head">
+                                <label className="field">
+                                  <span>{dataVendorLabels[locale][category.key] ?? category.label}</span>
+                                  <select value={value} onChange={(event) => updateMarketGroupVendor(section.markets, category.key, event.target.value)}>
+                                    <option value="">{t.inheritDefault} ({dataVendorOptionLabel(inherited, locale)})</option>
+                                    {vendorOptions(category.options, { category: category.key, market: sectionMarket }).map((option) => (
+                                      <option key={option} value={option}>
+                                        {dataVendorOptionLabel(option, locale)}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                {selectedCustom && (
+                                  <label className="field">
+                                    <span>{t.baseUrl}</span>
+                                    <input
+                                      value={settings.baseUrl ?? ''}
+                                      onChange={(event) => updateMarketGroupCustomBaseUrl(section.markets, category.key, event.target.value)}
+                                      placeholder="https://data.example.com"
+                                    />
+                                  </label>
+                                )}
+                              </div>
+                              {selectedCustom && (
+                                <div className="endpoint-grid market-endpoint-grid">
+                                  {methods.map((method) => (
+                                    <label key={`${section.key}-${method.method}-endpoint`} className="field">
+                                      <span>{customMethodLabels[locale][method.method] ?? method.label}</span>
+                                      <input
+                                        value={settings.endpoints?.[method.method] ?? method.defaultPath}
+                                        onChange={(event) => updateMarketGroupCustomEndpoint(section.markets, category.key, method.method, event.target.value)}
+                                        placeholder={t.endpointPath}
+                                      />
+                                    </label>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="method-vendor-list market-method-list">
+                                {methods.map((method) => {
+                                  const inheritedOverride = sharedMarketValue(section.markets, (market) => marketDataOverride(config, market).dataVendors?.[method.category]);
+                                  const methodInherited = inheritedOverride || config.dataVendors[method.category] || '';
+                                  const methodValue = sharedMarketValue(section.markets, (market) => marketDataOverride(config, market).toolVendors?.[method.method]);
+                                  return (
+                                    <label key={`${section.key}-${method.method}`} className="field method-vendor-row">
+                                      <span>
+                                        {customMethodLabels[locale][method.method] ?? method.label}
+                                        <small>{dataVendorLabels[locale][method.category] ?? category.label}</small>
+                                      </span>
+                                      <select value={methodValue} onChange={(event) => updateMarketGroupMethodVendor(section.markets, method.method, event.target.value)}>
+                                        <option value="">{t.useCategoryDefault} ({dataVendorOptionLabel(methodInherited, locale)})</option>
+                                        {vendorOptions(category.options, { category: method.category, method: method.method, market: sectionMarket }).map((option) => (
+                                          <option key={option} value={option}>
+                                            {dataVendorOptionLabel(option, locale)}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </section>
+                          );
+                        })}
+                      </div>
+                    </details>
+                  );
+                })}
               </div>
             </Panel>
 
@@ -2034,167 +2198,6 @@ function App() {
               </div>
             </Panel>
 
-            <Panel title={t.allApiKeys} icon={<KeyRound size={17} />}>
-              <div className="secret-list">
-                {metadata.secretFields.map((field) => (
-                  <label key={field} className="secret-row">
-                    <span>
-                      {field}
-                      <small>{secretStatus[field]?.configured ? secretStatus[field]?.masked : t.notConfigured}</small>
-                    </span>
-                    <input
-                      type="password"
-                      autoComplete="off"
-                      placeholder={secretStatus[field]?.configured ? t.replaceValue : t.pasteKey}
-                      value={secretDraft[field] ?? ''}
-                      onChange={(event) => setSecretDraft((current) => ({ ...current, [field]: event.target.value }))}
-                    />
-                  </label>
-                ))}
-              </div>
-              <button className="secondary full" onClick={saveSecrets} disabled={isSaving}>
-                <Save size={16} />
-                {t.saveSecrets}
-              </button>
-            </Panel>
-
-            <Panel title={t.dataVendors} icon={<Database size={17} />}>
-              {metadata.dataVendorCategories.map((category) => (
-                <label key={category.key} className="field">
-                  <span>{dataVendorLabels[locale][category.key] ?? category.label}</span>
-                  <select value={config.dataVendors[category.key] ?? ''} onChange={(event) => updateVendor(category.key, event.target.value)}>
-                    {category.options.filter((option) => option !== 'custom').map((option) => (
-                      <option key={option} value={option}>
-                        {dataVendorOptionLabel(option, locale)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ))}
-              <div className="section-title">
-                <ListOrdered size={16} />
-                {t.methodOverrides}
-              </div>
-              <div className="method-vendor-list">
-                {metadata.customDataMethods.map((method) => {
-                  const category = metadata.dataVendorCategories.find((item) => item.key === method.category);
-                  const categoryVendor = config.dataVendors[method.category] ?? '';
-                  return (
-                    <label key={method.method} className="field method-vendor-row">
-                      <span>
-                        {customMethodLabels[locale][method.method] ?? method.label}
-                        <small>{dataVendorLabels[locale][method.category] ?? category?.label ?? method.category}</small>
-                      </span>
-                      <select value={(config.toolVendors ?? {})[method.method] ?? ''} onChange={(event) => updateToolVendor(method.method, event.target.value)}>
-                        <option value="">{t.useCategoryDefault} ({dataVendorOptionLabel(categoryVendor, locale)})</option>
-                        {(category?.options ?? []).filter((option) => option !== 'custom').map((option) => (
-                          <option key={option} value={option}>
-                            {dataVendorOptionLabel(option, locale)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  );
-                })}
-              </div>
-            </Panel>
-
-            <Panel title={t.marketDataVendors} icon={<Database size={17} />}>
-              <p className="hint">{t.marketDataHint}</p>
-              <div className="market-data-list">
-                {marketDataSections.map((section) => {
-                  const hasOverride = marketGroupHasOverride(section.markets);
-                  const sectionMarket = section.markets[0];
-                  return (
-                    <details key={section.key} className={hasOverride ? 'market-data-section active' : 'market-data-section'} open={section.markets.includes(config.stockMarket) || hasOverride}>
-                      <summary>
-                        <span>{section.label}</span>
-                        <small>{hasOverride ? t.marketOverrideConfigured : t.inheritDefault}</small>
-                      </summary>
-                      <div className="market-data-body">
-                        {metadata.dataVendorCategories.map((category) => {
-                          const inherited = config.dataVendors[category.key] ?? '';
-                          const value = sharedMarketValue(section.markets, (market) => marketDataOverride(config, market).dataVendors?.[category.key]);
-                          return (
-                            <label key={`${section.key}-${category.key}`} className="field">
-                              <span>{dataVendorLabels[locale][category.key] ?? category.label}</span>
-                              <select value={value} onChange={(event) => updateMarketGroupVendor(section.markets, category.key, event.target.value)}>
-                                <option value="">{t.inheritDefault} ({dataVendorOptionLabel(inherited, locale)})</option>
-                                {vendorOptions(category.options, { category: category.key, market: sectionMarket }).map((option) => (
-                                  <option key={option} value={option}>
-                                    {dataVendorOptionLabel(option, locale)}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                          );
-                        })}
-                        <div className="section-title">
-                          <ListOrdered size={16} />
-                          {t.methodOverrides}
-                        </div>
-                        <div className="method-vendor-list">
-                          {metadata.customDataMethods.map((method) => {
-                            const category = metadata.dataVendorCategories.find((item) => item.key === method.category);
-                            const inheritedOverride = sharedMarketValue(section.markets, (market) => marketDataOverride(config, market).dataVendors?.[method.category]);
-                            const inherited = inheritedOverride || config.dataVendors[method.category] || '';
-                            const value = sharedMarketValue(section.markets, (market) => marketDataOverride(config, market).toolVendors?.[method.method]);
-                            return (
-                              <label key={`${section.key}-${method.method}`} className="field method-vendor-row">
-                                <span>
-                                  {customMethodLabels[locale][method.method] ?? method.label}
-                                  <small>{dataVendorLabels[locale][method.category] ?? category?.label ?? method.category}</small>
-                                </span>
-                                <select value={value} onChange={(event) => updateMarketGroupMethodVendor(section.markets, method.method, event.target.value)}>
-                                  <option value="">{t.inheritDefault} ({dataVendorOptionLabel(inherited, locale)})</option>
-                                  {vendorOptions(category?.options ?? [], { category: method.category, method: method.method, market: sectionMarket }).map((option) => (
-                                    <option key={option} value={option}>
-                                      {dataVendorOptionLabel(option, locale)}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
-                            );
-                          })}
-                        </div>
-                        <div className="custom-interface-list market-custom-interface-list">
-                          {metadata.dataVendorCategories.map((category) => {
-                            const methods = metadata.customDataMethods.filter((method) => method.category === category.key);
-                            const selectedCustom = marketGroupUsesCustomRoute(section.markets, category.key, methods);
-                            if (!selectedCustom) return null;
-                            const settings = marketGroupCustomSettings(section.markets, category.key);
-                            return (
-                              <section key={`${section.key}-${category.key}-custom`} className="custom-interface active">
-                                <label className="field">
-                                  <span>{dataVendorLabels[locale][category.key] ?? category.label} · {t.baseUrl}</span>
-                                  <input
-                                    value={settings.baseUrl ?? ''}
-                                    onChange={(event) => updateMarketGroupCustomBaseUrl(section.markets, category.key, event.target.value)}
-                                    placeholder="https://data.example.com"
-                                  />
-                                </label>
-                                <div className="endpoint-grid">
-                                  {methods.map((method) => (
-                                    <label key={`${section.key}-${method.method}-endpoint`} className="field">
-                                      <span>{customMethodLabels[locale][method.method] ?? method.label}</span>
-                                      <input
-                                        value={settings.endpoints?.[method.method] ?? method.defaultPath}
-                                        onChange={(event) => updateMarketGroupCustomEndpoint(section.markets, category.key, method.method, event.target.value)}
-                                        placeholder={t.endpointPath}
-                                      />
-                                    </label>
-                                  ))}
-                                </div>
-                              </section>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </details>
-                  );
-                })}
-              </div>
-            </Panel>
           </aside>
         </section>
       ) : (
