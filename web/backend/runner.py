@@ -468,14 +468,25 @@ class RunManager:
             final_state = trace[-1]
             decision_text = final_state.get("final_trade_decision", "")
             run.decision = graph.process_signal(decision_text) if decision_text else None
-            final_state = {
-                **final_state,
-                **run_reference_reviews(
-                    getattr(graph, "deep_thinking_llm", None),
+            reviewer_llm = getattr(graph, "deep_thinking_llm", None)
+            reference_reviews: dict[str, str] = {}
+            if reviewer_llm is not None:
+                message_buffer.update_agent_status("Buffett Reviewer", "in_progress")
+                message_buffer.update_agent_status("Munger Reviewer", "in_progress")
+                self._emit_progress(run, message_buffer, stats_handler, start)
+                reference_reviews = run_reference_reviews(
+                    reviewer_llm,
                     final_state,
                     run.config.output_language,
-                ),
-            }
+                )
+                if reference_reviews.get("buffett_review"):
+                    message_buffer.update_report_section("buffett_review", reference_reviews["buffett_review"])
+                if reference_reviews.get("munger_review"):
+                    message_buffer.update_report_section("munger_review", reference_reviews["munger_review"])
+                message_buffer.update_agent_status("Buffett Reviewer", "completed")
+                message_buffer.update_agent_status("Munger Reviewer", "completed")
+                self._emit_progress(run, message_buffer, stats_handler, start)
+            final_state = {**final_state, **reference_reviews}
 
             graph.curr_state = final_state
             graph.ticker = run.request.ticker
@@ -634,6 +645,15 @@ class RunManager:
                 message_buffer.update_agent_status("Neutral Analyst", "completed")
                 message_buffer.update_agent_status("Portfolio Manager", "completed")
 
+        self._emit_progress(run, message_buffer, stats_handler, start)
+
+    def _emit_progress(
+        self,
+        run: RunRecord,
+        message_buffer: MessageBuffer,
+        stats_handler: StatsCallbackHandler,
+        start: float,
+    ) -> None:
         run.reports = {key: value for key, value in message_buffer.report_sections.items() if value}
         run.stats = stats_handler.get_stats()
         run.emit(

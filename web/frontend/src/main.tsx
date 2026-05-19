@@ -569,6 +569,8 @@ const agentLabels: Record<Locale, Record<string, string>> = {
     'Neutral Analyst': '中性风险分析师',
     'Conservative Analyst': '保守风险分析师',
     'Portfolio Manager': '组合经理',
+    'Buffett Reviewer': '巴菲特参考评审',
+    'Munger Reviewer': '芒格参考评审',
   },
 };
 
