@@ -1102,7 +1102,7 @@ textarea {
 }
 
 .market-method-list {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .market-custom-interface-list:empty {
@@ -1127,6 +1127,21 @@ textarea {
 
 .market-endpoint-grid {
   margin-top: 0;
+}
+
+.market-method-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  align-items: end;
+}
+
+.market-method-row.active {
+  grid-template-columns: minmax(0, 1.25fr) minmax(150px, 0.75fr);
+}
+
+.endpoint-field input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .secret-row {

@@ -1839,40 +1839,38 @@ function App() {
                                   </label>
                                 )}
                               </div>
-                              {selectedCustom && (
-                                <div className="endpoint-grid market-endpoint-grid">
-                                  {methods.map((method) => (
-                                    <label key={`${section.key}-${method.method}-endpoint`} className="field">
-                                      <span>{customMethodLabels[locale][method.method] ?? method.label}</span>
-                                      <input
-                                        value={settings.endpoints?.[method.method] ?? method.defaultPath}
-                                        onChange={(event) => updateMarketGroupCustomEndpoint(section.markets, category.key, method.method, event.target.value)}
-                                        placeholder={t.endpointPath}
-                                      />
-                                    </label>
-                                  ))}
-                                </div>
-                              )}
                               <div className="method-vendor-list market-method-list">
                                 {methods.map((method) => {
                                   const inheritedOverride = sharedMarketValue(section.markets, (market) => marketDataOverride(config, market).dataVendors?.[method.category]);
                                   const methodInherited = inheritedOverride || config.dataVendors[method.category] || '';
                                   const methodValue = sharedMarketValue(section.markets, (market) => marketDataOverride(config, market).toolVendors?.[method.method]);
                                   return (
-                                    <label key={`${section.key}-${method.method}`} className="field method-vendor-row">
-                                      <span>
-                                        {customMethodLabels[locale][method.method] ?? method.label}
-                                        <small>{dataVendorLabels[locale][method.category] ?? category.label}</small>
-                                      </span>
-                                      <select value={methodValue} onChange={(event) => updateMarketGroupMethodVendor(section.markets, method.method, event.target.value)}>
-                                        <option value="">{t.useCategoryDefault} ({dataVendorOptionLabel(methodInherited, locale)})</option>
-                                        {vendorOptions(category.options, { category: method.category, method: method.method, market: sectionMarket }).map((option) => (
-                                          <option key={option} value={option}>
-                                            {dataVendorOptionLabel(option, locale)}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </label>
+                                    <section key={`${section.key}-${method.method}`} className={selectedCustom ? 'market-method-row active' : 'market-method-row'}>
+                                      <label className="field method-vendor-row">
+                                        <span>
+                                          {customMethodLabels[locale][method.method] ?? method.label}
+                                          <small>{dataVendorLabels[locale][method.category] ?? category.label}</small>
+                                        </span>
+                                        <select value={methodValue} onChange={(event) => updateMarketGroupMethodVendor(section.markets, method.method, event.target.value)}>
+                                          <option value="">{t.useCategoryDefault} ({dataVendorOptionLabel(methodInherited, locale)})</option>
+                                          {vendorOptions(category.options, { category: method.category, method: method.method, market: sectionMarket }).map((option) => (
+                                            <option key={option} value={option}>
+                                              {dataVendorOptionLabel(option, locale)}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </label>
+                                      {selectedCustom && (
+                                        <label className="field endpoint-field">
+                                          <span>{t.endpointPath}</span>
+                                          <input
+                                            value={settings.endpoints?.[method.method] ?? method.defaultPath}
+                                            onChange={(event) => updateMarketGroupCustomEndpoint(section.markets, category.key, method.method, event.target.value)}
+                                            placeholder={method.defaultPath}
+                                          />
+                                        </label>
+                                      )}
+                                    </section>
                                   );
                                 })}
                               </div>
