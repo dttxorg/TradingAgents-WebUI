@@ -63,7 +63,6 @@ import {
   longbridgeProxyCategories,
   marketDataOverride,
   normalizeDisplayVendor,
-  setAshareFundamentalsMarkets,
   syncAshareFundamentalsBaseUrl,
   syncLongbridgeProxyBaseUrl,
   updateMarketCustomDataBaseUrl,
@@ -107,6 +106,7 @@ const messages = {
     dataVendors: 'Default data vendors',
     marketDataVendors: 'Market data vendors',
     marketDataHint: 'Each market can override the default data routes. Leave a field on inherit to use the default backend configuration.',
+    marketOverrideConfigured: 'Market routes configured',
     inheritDefault: 'Inherit default',
     analysisSetup: 'Analysis setup',
     ticker: 'Ticker',
@@ -171,19 +171,6 @@ const messages = {
     currentReport: 'Current run',
     showCurrentRun: 'Show current run',
     archivedReport: 'Archived report',
-    customInterfaces: 'Custom HTTP data interface',
-    customOpenAiHint: 'OpenAI-compatible Base URL, model IDs, and CUSTOM_OPENAI_API_KEY.',
-    customDataHint: 'Choose custom as a data vendor, then point that category at an HTTP service.',
-    longbridgeProxyBaseUrl: 'Longbridge read-only proxy (advanced preset)',
-    longbridgeProxyHint: 'Saved as custom data interface; Longbridge credentials stay on the proxy service.',
-    longbridgeProxyUrlField: 'Proxy Base URL',
-    longbridgeProxyPlaceholder: 'https://longbridge-proxy.example.com',
-    ashareFundamentalsBaseUrl: 'A-share fundamentals (advanced preset)',
-    ashareFundamentalsHint: 'Market-specific override for Shanghai/Shenzhen A shares only. US/HK fundamentals keep the default backend vendors unless you customize them separately. Tushare Pro is better for production but needs a token/points; AkShare/Eastmoney proxies are useful for quick validation with weaker stability.',
-    ashareFundamentalsUrlField: 'A-share fundamentals Base URL',
-    ashareFundamentalsPlaceholder: 'https://ashare-fundamentals.example.com',
-    ashareShanghai: 'Shanghai A shares',
-    ashareShenzhen: 'Shenzhen A shares',
     methodOverrides: 'Method-level data routes',
     useCategoryDefault: 'Use category default',
     setupRecommendations: 'Setup recommendations',
@@ -315,6 +302,7 @@ const messages = {
     dataVendors: '默认数据源',
     marketDataVendors: '市场数据源',
     marketDataHint: '每个市场都可以覆盖默认数据路由；保持继承默认时，会继续使用后端默认配置。',
+    marketOverrideConfigured: '已配置市场数据源',
     inheritDefault: '继承默认',
     analysisSetup: '分析配置',
     ticker: '股票代码',
@@ -379,19 +367,6 @@ const messages = {
     currentReport: '当前运行',
     showCurrentRun: '查看当前运行',
     archivedReport: '历史报告',
-    customInterfaces: '自定义 HTTP 数据接口',
-    customOpenAiHint: 'OpenAI-compatible Base URL、模型 ID 和 CUSTOM_OPENAI_API_KEY。',
-    customDataHint: '将数据源选择为 custom 后，把对应分类指向你的 HTTP 数据服务。',
-    longbridgeProxyBaseUrl: '长桥只读代理（高级预设）',
-    longbridgeProxyHint: '选择后会按 custom 数据接口保存，不会把长桥密钥放进浏览器或 WebUI 后端。',
-    longbridgeProxyUrlField: '代理 Base URL',
-    longbridgeProxyPlaceholder: 'https://longbridge-proxy.example.com',
-    ashareFundamentalsBaseUrl: 'A 股基本面接口（高级预设）',
-    ashareFundamentalsHint: '这是只针对上证/深证 A 股的市场级覆盖；美股/港股基本面会继续使用后端默认数据源，除非你单独自定义。Tushare Pro 更适合生产但需要 token/积分；AkShare/东方财富代理适合快速验证但稳定性较弱。',
-    ashareFundamentalsUrlField: 'A 股基本面 Base URL',
-    ashareFundamentalsPlaceholder: 'https://ashare-fundamentals.example.com',
-    ashareShanghai: '上证 A 股',
-    ashareShenzhen: '深证 A 股',
     methodOverrides: '按后端方法单独设置数据源',
     useCategoryDefault: '使用分类默认值',
     setupRecommendations: '设置建议',
@@ -642,7 +617,7 @@ function App() {
   const [rechargeDraft, setRechargeDraft] = useState<Record<string, string>>({});
   const [secretDraft, setSecretDraft] = useState<Record<string, string>>({});
   const [discoveredModels, setDiscoveredModels] = useState<Record<string, Array<{ label: string; value: string }>>>({});
-  const [longbridgeProxyBaseUrl, setLongbridgeProxyBaseUrl] = useState(LONGBRIDGE_PROXY_ENV);
+  const [longbridgeProxyBaseUrl] = useState(LONGBRIDGE_PROXY_ENV);
   const [ashareFundamentalsBaseUrl, setAshareFundamentalsBaseUrl] = useState(ASHARE_FUNDAMENTALS_ENV);
   const [activeRun, setActiveRun] = useState<RunInfo | null>(null);
   const [batchRuns, setBatchRuns] = useState<RunInfo[]>([]);
@@ -904,11 +879,7 @@ function App() {
   const isCustomOpenAi = config?.llmProvider === 'custom_openai';
   const customNeedsManualModel = isCustomOpenAi && !discoveredModels[config?.llmProvider ?? '']?.length;
   const showDeepSeekThinkingMode = Boolean(config && (isCustomOpenAi || isDeepSeekConfig(config, provider)));
-  const selectedLongbridgeCategories = config ? longbridgeProxyCategories(config, metadata.customDataMethods) : new Set<string>();
-  const hasLongbridgeProxyPreset = selectedLongbridgeCategories.size > 0;
   const currentAshareFundamentalsBaseUrl = config ? (ashareFundamentalsBaseUrl || ashareFundamentalsBaseUrlFromConfig(config)) : ashareFundamentalsBaseUrl;
-  const selectedAshareFundamentalsMarkets = config ? ashareFundamentalsMarkets(config, metadata.customDataMethods) : new Set<string>();
-  const hasAshareFundamentalsPreset = selectedAshareFundamentalsMarkets.size > 0;
   const outputLocale = outputLanguageLocale(config?.outputLanguage ?? 'English');
   const setupRecommendations = useMemo(
     () => (config ? buildSetupRecommendations(config, metadata, secretStatus, provider, locale, longbridgeProxyBaseUrl, currentAshareFundamentalsBaseUrl) : []),
@@ -980,27 +951,6 @@ function App() {
     }
   }
 
-  function updateLongbridgeProxyBaseUrl(value: string) {
-    setLongbridgeProxyBaseUrl(value);
-    setConfig((current) => (current ? hydrateLongbridgeProxyConfig(current, value, metadata.customDataMethods, currentAshareFundamentalsBaseUrl) : current));
-  }
-
-  function updateAshareFundamentalsBaseUrl(value: string) {
-    setAshareFundamentalsBaseUrl(value);
-    setConfig((current) => (current ? hydrateLongbridgeProxyConfig(current, longbridgeProxyBaseUrl, metadata.customDataMethods, value) : current));
-  }
-
-  function toggleAshareFundamentalsMarket(market: 'sh' | 'sz', enabled: boolean) {
-    if (!config) return;
-    const markets = new Set(ashareFundamentalsMarkets(config, metadata.customDataMethods));
-    if (enabled) {
-      markets.add(market);
-    } else {
-      markets.delete(market);
-    }
-    setConfig(setAshareFundamentalsMarkets(config, [...markets], currentAshareFundamentalsBaseUrl, metadata.customDataMethods));
-  }
-
   function updateLlmRoute(routeKey: string, patch: Partial<WebConfig['llmRoutes'][string]>) {
     if (!config) return;
     const current = config.llmRoutes?.[routeKey] ?? { enabled: false, provider: null, backendUrl: null, modelId: null };
@@ -1024,33 +974,6 @@ function App() {
     updateConfig('marketProfiles', {
       ...(config.marketProfiles ?? {}),
       [market]: { ...current, ...patch },
-    });
-  }
-
-  function updateCustomDataBaseUrl(category: string, value: string) {
-    if (!config) return;
-    const current = config.customDataInterfaces[category] ?? { baseUrl: null, endpoints: {} };
-    const nextInterfaces = {
-      ...config.customDataInterfaces,
-      [category]: { ...current, baseUrl: value || null },
-    };
-    const nextConfig = { ...config, customDataInterfaces: nextInterfaces };
-    setConfig(
-      isLongbridgeProxyBaseUrl(value, longbridgeProxyBaseUrl) || isLongbridgeProxyBaseUrl(value, currentAshareFundamentalsBaseUrl)
-        ? hydrateLongbridgeProxyConfig(nextConfig, longbridgeProxyBaseUrl, metadata.customDataMethods, currentAshareFundamentalsBaseUrl)
-        : nextConfig,
-    );
-  }
-
-  function updateCustomDataEndpoint(category: string, method: string, value: string) {
-    if (!config) return;
-    const current = config.customDataInterfaces[category] ?? { baseUrl: null, endpoints: {} };
-    updateConfig('customDataInterfaces', {
-      ...config.customDataInterfaces,
-      [category]: {
-        ...current,
-        endpoints: { ...current.endpoints, [method]: value },
-      },
     });
   }
 
@@ -1795,57 +1718,6 @@ function App() {
               </div>
             </Panel>
 
-            <Panel title={t.customInterfaces} icon={<Server size={17} />}>
-              <p className="hint">{t.customOpenAiHint}</p>
-              <p className="hint">{t.customDataHint}</p>
-              <details className="advanced-data-preset" open={hasLongbridgeProxyPreset}>
-                <summary>{t.longbridgeProxyBaseUrl}</summary>
-                <p className="hint">{t.longbridgeProxyHint}</p>
-                <label className="field">
-                  <span>{t.longbridgeProxyUrlField}</span>
-                  <input
-                    value={longbridgeProxyBaseUrl}
-                    onChange={(event) => updateLongbridgeProxyBaseUrl(event.target.value)}
-                    placeholder={LONGBRIDGE_PROXY_ENV || t.longbridgeProxyPlaceholder}
-                  />
-                </label>
-              </details>
-              <div className="custom-interface-list">
-                {metadata.dataVendorCategories.map((category) => {
-                  const settings = config.customDataInterfaces[category.key] ?? { baseUrl: null, endpoints: {} };
-                  const methods = metadata.customDataMethods.filter((method) => method.category === category.key);
-                  const selectedCustom =
-                    isCustomLikeDataVendor(config.dataVendors[category.key]) ||
-                    methods.some((method) => isCustomLikeDataVendor((config.toolVendors ?? {})[method.method]));
-                  return (
-                    <section key={category.key} className={selectedCustom ? 'custom-interface active' : 'custom-interface'}>
-                      <label className="field">
-                        <span>{dataVendorLabels[locale][category.key] ?? category.label}</span>
-                        <input
-                          value={settings.baseUrl ?? ''}
-                          onChange={(event) => updateCustomDataBaseUrl(category.key, event.target.value)}
-                          placeholder="https://data.example.com"
-                        />
-                      </label>
-                      <div className="endpoint-grid">
-                        {methods.map((method) => (
-                          <label key={method.method} className="field">
-                            <span>{customMethodLabels[locale][method.method] ?? method.label}</span>
-                            <input
-                              value={settings.endpoints[method.method] ?? method.defaultPath}
-                              onChange={(event) => updateCustomDataEndpoint(category.key, method.method, event.target.value)}
-                              placeholder={t.endpointPath}
-                            />
-                          </label>
-                        ))}
-                      </div>
-                    </section>
-                  );
-                })}
-              </div>
-              <p className="hint">{t.baseUrlRequired}</p>
-            </Panel>
-
             <Panel title={t.backtestSchedule} icon={<History size={17} />}>
               {backtestConfig ? (
                 <div className="backtest-settings">
@@ -2103,7 +1975,7 @@ function App() {
                 <label key={category.key} className="field">
                   <span>{dataVendorLabels[locale][category.key] ?? category.label}</span>
                   <select value={config.dataVendors[category.key] ?? ''} onChange={(event) => updateVendor(category.key, event.target.value)}>
-                    {vendorOptions(category.options, { category: category.key }).map((option) => (
+                    {category.options.filter((option) => option !== 'custom').map((option) => (
                       <option key={option} value={option}>
                         {dataVendorOptionLabel(option, locale)}
                       </option>
@@ -2127,7 +1999,7 @@ function App() {
                       </span>
                       <select value={(config.toolVendors ?? {})[method.method] ?? ''} onChange={(event) => updateToolVendor(method.method, event.target.value)}>
                         <option value="">{t.useCategoryDefault} ({dataVendorOptionLabel(categoryVendor, locale)})</option>
-                        {vendorOptions(category?.options ?? [], { category: method.category, method: method.method }).map((option) => (
+                        {(category?.options ?? []).filter((option) => option !== 'custom').map((option) => (
                           <option key={option} value={option}>
                             {dataVendorOptionLabel(option, locale)}
                           </option>
@@ -2152,7 +2024,7 @@ function App() {
                     <details key={market.key} className={hasOverride ? 'market-data-section active' : 'market-data-section'} open={market.key === config.stockMarket || hasOverride}>
                       <summary>
                         <span>{marketLabel(market.key, locale)}</span>
-                        <small>{hasOverride ? t.customInterfaces : t.inheritDefault}</small>
+                        <small>{hasOverride ? t.marketOverrideConfigured : t.inheritDefault}</small>
                       </summary>
                       <div className="market-data-body">
                         {metadata.dataVendorCategories.map((category) => {
@@ -3171,7 +3043,7 @@ function dataVendorOptionLabel(option: string, locale: Locale) {
       : 'a_share_fundamentals / A-share fundamentals (advanced preset)';
   }
   if (option === 'custom') {
-    return locale === 'zh' ? 'custom / 自定义 HTTP 数据接口' : 'custom / Custom HTTP data interface';
+    return locale === 'zh' ? 'custom / 自定义市场数据源' : 'custom / Custom market data source';
   }
   return option;
 }
@@ -3310,11 +3182,42 @@ function buildSetupRecommendations(
   });
 
   if (directCustomCategories.size > 0 && !secretStatus.CUSTOM_DATA_API_KEY?.configured) {
-    items.push(locale === 'zh' ? '已启用 custom 数据接口，建议配置 CUSTOM_DATA_API_KEY 保护自定义数据服务。' : 'Custom data routes are enabled; configure CUSTOM_DATA_API_KEY to protect the custom data service.');
+    items.push(locale === 'zh' ? '已启用 custom 市场数据源，建议配置 CUSTOM_DATA_API_KEY 保护自定义数据服务。' : 'Custom market data routes are enabled; configure CUSTOM_DATA_API_KEY to protect the custom data service.');
   }
 
-  if (longbridgeCategories.size > 0 && !longbridgeProxyBaseUrl.trim()) {
-    const names = [...longbridgeCategories].map((category) => dataVendorLabels[locale][category] ?? category).join(', ');
+  const missingLongbridgeBase = new Set<string>();
+  Object.entries(config.dataVendors).forEach(([category, vendor]) => {
+    if (isLongbridgeProxyVendor(vendor) && !(longbridgeProxyBaseUrl.trim() || config.customDataInterfaces[category]?.baseUrl)) {
+      missingLongbridgeBase.add(category);
+    }
+  });
+  Object.entries(toolVendors).forEach(([method, vendor]) => {
+    const category = methodCategory[method];
+    if (category && isLongbridgeProxyVendor(vendor) && !(longbridgeProxyBaseUrl.trim() || config.customDataInterfaces[category]?.baseUrl)) {
+      missingLongbridgeBase.add(category);
+    }
+  });
+  Object.entries(marketOverrides).forEach(([market, override]) => {
+    const marketCategories = new Set<string>();
+    Object.entries(override.dataVendors ?? {}).forEach(([category, vendor]) => {
+      if (isLongbridgeProxyVendor(vendor)) marketCategories.add(category);
+    });
+    Object.entries(override.toolVendors ?? {}).forEach(([method, vendor]) => {
+      const category = methodCategory[method];
+      if (category && isLongbridgeProxyVendor(vendor)) marketCategories.add(category);
+    });
+    marketCategories.forEach((category) => {
+      if (!override.customDataInterfaces?.[category]?.baseUrl) {
+        missingLongbridgeBase.add(`${market}.${category}`);
+      }
+    });
+  });
+  if (missingLongbridgeBase.size > 0) {
+    const names = [...missingLongbridgeBase].map((category) => {
+      if (!category.includes('.')) return dataVendorLabels[locale][category] ?? category;
+      const [market, marketCategory] = category.split('.');
+      return `${marketLabel(market, locale)} / ${dataVendorLabels[locale][marketCategory] ?? marketCategory}`;
+    }).join(', ');
     items.push(locale === 'zh' ? `已选择长桥只读代理，但 Longbridge Proxy Base URL 为空：${names}。` : `Longbridge read-only proxy is selected, but Longbridge Proxy Base URL is empty for: ${names}.`);
   }
 
@@ -3338,7 +3241,7 @@ function buildSetupRecommendations(
       const [market, marketCategory] = category.split('.');
       return `${marketLabel(market, locale)} / ${dataVendorLabels[locale][marketCategory] ?? marketCategory}`;
     }).join(', ');
-    items.push(locale === 'zh' ? `这些 custom 数据分类还缺少 Base URL：${names}。` : `Custom data Base URL is missing for: ${names}.`);
+    items.push(locale === 'zh' ? `这些 custom 市场数据源还缺少 Base URL：${names}。` : `Custom market data Base URL is missing for: ${names}.`);
   }
 
   const newsMethods = metadata.customDataMethods.filter((method) => method.category === 'news_data');

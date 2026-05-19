@@ -302,3 +302,14 @@ test('market data overrides provide full independent API settings per market', (
   assert.equal(payload.marketDataOverrides.sh.dataVendors.fundamental_data, 'custom');
   assert.equal(payload.marketDataOverrides.sh.customDataInterfaces.fundamental_data.baseUrl, 'https://ashare.example.com');
 });
+
+test('market Longbridge preset keeps per-market Base URL when global proxy URL is empty', () => {
+  let configured = baseConfig();
+  configured = mapping.updateMarketToolVendor(configured, 'hk', 'get_news', 'longbridge_proxy', methods);
+  configured = mapping.updateMarketCustomDataBaseUrl(configured, 'hk', 'news_data', 'https://hk-longbridge.example.com');
+
+  const payload = mapping.configForBackend(configured, '', methods);
+
+  assert.equal(payload.marketDataOverrides.hk.toolVendors.get_news, 'custom');
+  assert.equal(payload.marketDataOverrides.hk.customDataInterfaces.news_data.baseUrl, 'https://hk-longbridge.example.com');
+});

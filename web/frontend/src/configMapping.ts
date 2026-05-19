@@ -316,13 +316,21 @@ export function syncLongbridgeProxyBaseUrl(config: WebConfig, baseUrl: string, m
   Object.entries(config.dataVendors).forEach(([category, vendor]) => {
     if (!isLongbridgeProxyVendor(vendor)) return;
     const current = nextInterfaces[category] ?? { baseUrl: null, endpoints: {} };
-    nextInterfaces[category] = { ...current, baseUrl: baseUrl.trim() || null, endpoints: { ...defaultEndpointsForCategory(category, methods), ...current.endpoints } };
+    nextInterfaces[category] = {
+      ...current,
+      baseUrl: baseUrl.trim() || current.baseUrl || null,
+      endpoints: { ...defaultEndpointsForCategory(category, methods), ...current.endpoints },
+    };
   });
   Object.entries(config.toolVendors ?? {}).forEach(([method, vendor]) => {
     const category = methodCategory[method];
     if (!category || !isLongbridgeProxyVendor(vendor)) return;
     const current = nextInterfaces[category] ?? { baseUrl: null, endpoints: {} };
-    nextInterfaces[category] = { ...current, baseUrl: baseUrl.trim() || null, endpoints: { ...defaultEndpointsForCategory(category, methods), ...current.endpoints } };
+    nextInterfaces[category] = {
+      ...current,
+      baseUrl: baseUrl.trim() || current.baseUrl || null,
+      endpoints: { ...defaultEndpointsForCategory(category, methods), ...current.endpoints },
+    };
   });
 
   let nextConfig = { ...config, customDataInterfaces: nextInterfaces };
@@ -341,7 +349,7 @@ export function syncLongbridgeProxyBaseUrl(config: WebConfig, baseUrl: string, m
       const current = customDataInterfaces[category] ?? { baseUrl: null, endpoints: {} };
       customDataInterfaces[category] = {
         ...current,
-        baseUrl: baseUrl.trim() || null,
+        baseUrl: baseUrl.trim() || current.baseUrl || null,
         endpoints: {
           ...defaultEndpointsForCategory(category, methods),
           ...(current.endpoints ?? {}),
@@ -381,7 +389,7 @@ export function setAshareFundamentalsMarkets(
       customDataInterfaces[ASHARE_FUNDAMENTALS_CATEGORY] = {
         ...defaultAshareFundamentalsInterface(baseUrl, methods),
         ...(customDataInterfaces[ASHARE_FUNDAMENTALS_CATEGORY] ?? {}),
-        baseUrl: baseUrl.trim() || null,
+        baseUrl: baseUrl.trim() || customDataInterfaces[ASHARE_FUNDAMENTALS_CATEGORY]?.baseUrl || null,
         endpoints: {
           ...defaultEndpointsForCategory(ASHARE_FUNDAMENTALS_CATEGORY, methods),
           ...(customDataInterfaces[ASHARE_FUNDAMENTALS_CATEGORY]?.endpoints ?? {}),
