@@ -140,6 +140,18 @@ function marketInterfaceWithDefaults(
   };
 }
 
+function categoryHasCustomLikeRoute(
+  dataVendors: Record<string, string>,
+  toolVendors: Record<string, string>,
+  category: string,
+  methods: Metadata['customDataMethods'],
+) {
+  return (
+    isCustomLikeDataVendor(dataVendors[category]) ||
+    methods.some((method) => method.category === category && isCustomLikeDataVendor(toolVendors[method.method]))
+  );
+}
+
 export function updateMarketDataVendor(
   config: WebConfig,
   market: string,
@@ -157,6 +169,9 @@ export function updateMarketDataVendor(
     if (isCustomLikeDataVendor(vendor)) {
       customDataInterfaces[category] = marketInterfaceWithDefaults(config, market, category, methods);
     }
+  }
+  if (!categoryHasCustomLikeRoute(dataVendors, override.toolVendors ?? {}, category, methods)) {
+    delete customDataInterfaces[category];
   }
   return setMarketOverride(config, market, {
     ...override,
@@ -183,6 +198,9 @@ export function updateMarketToolVendor(
     if (category && isCustomLikeDataVendor(vendor)) {
       customDataInterfaces[category] = marketInterfaceWithDefaults(config, market, category, methods);
     }
+  }
+  if (category && !categoryHasCustomLikeRoute(override.dataVendors ?? {}, toolVendors, category, methods)) {
+    delete customDataInterfaces[category];
   }
   return setMarketOverride(config, market, {
     ...override,

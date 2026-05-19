@@ -313,3 +313,12 @@ test('market Longbridge preset keeps per-market Base URL when global proxy URL i
   assert.equal(payload.marketDataOverrides.hk.toolVendors.get_news, 'custom');
   assert.equal(payload.marketDataOverrides.hk.customDataInterfaces.news_data.baseUrl, 'https://hk-longbridge.example.com');
 });
+
+test('market custom interface is removed when the market route returns to inherit', () => {
+  let configured = baseConfig();
+  configured = mapping.updateMarketDataVendor(configured, 'hk', 'core_stock_apis', 'longbridge_proxy', methods);
+  configured = mapping.updateMarketCustomDataBaseUrl(configured, 'hk', 'core_stock_apis', 'https://hk-longbridge.example.com');
+  configured = mapping.updateMarketDataVendor(configured, 'hk', 'core_stock_apis', '', methods);
+
+  assert.equal(configured.marketDataOverrides.hk, undefined);
+});

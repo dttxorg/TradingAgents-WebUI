@@ -1016,6 +1016,58 @@ function App() {
     setConfig(updateMarketCustomDataEndpoint(config, market, category, method, value));
   }
 
+  function updateMarketGroupVendor(markets: string[], category: string, value: string) {
+    if (!config) return;
+    let nextConfig = config;
+    markets.forEach((market) => {
+      nextConfig = updateMarketDataVendor(nextConfig, market, category, value, metadata.customDataMethods);
+    });
+    if (isLongbridgeProxyVendor(value)) {
+      setConfig(syncLongbridgeProxyBaseUrl(nextConfig, longbridgeProxyBaseUrl, metadata.customDataMethods));
+    } else if (isAshareFundamentalsVendor(value)) {
+      setConfig(syncAshareFundamentalsBaseUrl(nextConfig, currentAshareFundamentalsBaseUrl, metadata.customDataMethods));
+    } else {
+      setConfig(nextConfig);
+    }
+  }
+
+  function updateMarketGroupMethodVendor(markets: string[], method: string, value: string) {
+    if (!config) return;
+    let nextConfig = config;
+    markets.forEach((market) => {
+      nextConfig = updateMarketToolVendor(nextConfig, market, method, value, metadata.customDataMethods);
+    });
+    if (isLongbridgeProxyVendor(value)) {
+      setConfig(syncLongbridgeProxyBaseUrl(nextConfig, longbridgeProxyBaseUrl, metadata.customDataMethods));
+    } else if (isAshareFundamentalsVendor(value)) {
+      setConfig(syncAshareFundamentalsBaseUrl(nextConfig, currentAshareFundamentalsBaseUrl, metadata.customDataMethods));
+    } else {
+      setConfig(nextConfig);
+    }
+  }
+
+  function updateMarketGroupCustomBaseUrl(markets: string[], category: string, value: string) {
+    if (!config) return;
+    let nextConfig = config;
+    markets.forEach((market) => {
+      nextConfig = updateMarketCustomDataBaseUrl(nextConfig, market, category, value);
+    });
+    setConfig(
+      isLongbridgeProxyBaseUrl(value, longbridgeProxyBaseUrl) || isLongbridgeProxyBaseUrl(value, currentAshareFundamentalsBaseUrl)
+        ? hydrateLongbridgeProxyConfig(nextConfig, longbridgeProxyBaseUrl, metadata.customDataMethods, currentAshareFundamentalsBaseUrl)
+        : nextConfig,
+    );
+  }
+
+  function updateMarketGroupCustomEndpoint(markets: string[], category: string, method: string, value: string) {
+    if (!config) return;
+    let nextConfig = config;
+    markets.forEach((market) => {
+      nextConfig = updateMarketCustomDataEndpoint(nextConfig, market, category, method, value);
+    });
+    setConfig(nextConfig);
+  }
+
   function updateBacktestConfig<K extends keyof BacktestScheduleConfig>(key: K, value: BacktestScheduleConfig[K]) {
     setBacktestConfig((current) => (current ? { ...current, [key]: value } : current));
   }
@@ -1383,6 +1435,42 @@ function App() {
       </div>
     </div>
   );
+  const aShareMarketKeys = metadata.stockMarkets.map((market) => market.key).filter((key) => key === 'sh' || key === 'sz');
+  const marketDataSections = [
+    ...metadata.stockMarkets
+      .filter((market) => market.key !== 'sh' && market.key !== 'sz')
+      .map((market) => ({ key: market.key, label: marketLabel(market.key, locale), markets: [market.key] })),
+    ...(aShareMarketKeys.length > 0
+      ? [{ key: 'a-share', label: locale === 'zh' ? 'A 股' : 'A shares', markets: aShareMarketKeys }]
+      : []),
+  ];
+  const marketGroupHasOverride = (markets: string[]) => markets.some((market) => {
+    const override = marketDataOverride(config, market);
+    return (
+      Object.keys(override.dataVendors ?? {}).length > 0 ||
+      Object.keys(override.toolVendors ?? {}).length > 0 ||
+      Object.keys(override.customDataInterfaces ?? {}).length > 0
+    );
+  });
+  const sharedMarketValue = (markets: string[], valueForMarket: (market: string) => string | undefined) => {
+    const values = markets.map((market) => valueForMarket(market) ?? '');
+    return values.every((value) => value === values[0]) ? values[0] : '';
+  };
+  const marketGroupUsesCustomRoute = (markets: string[], category: string, methods: Metadata['customDataMethods']) => (
+    markets.some((market) => {
+      const override = marketDataOverride(config, market);
+      return (
+        isCustomLikeDataVendor(override.dataVendors?.[category]) ||
+        methods.some((method) => isCustomLikeDataVendor(override.toolVendors?.[method.method]))
+      );
+    })
+  );
+  const marketGroupCustomSettings = (markets: string[], category: string) => {
+    const settings = markets
+      .map((market) => marketDataOverride(config, market).customDataInterfaces?.[category])
+      .find((item) => item?.baseUrl || Object.keys(item?.endpoints ?? {}).length > 0);
+    return settings ?? { baseUrl: null, endpoints: {} };
+  };
 
   return (
     <main className="app-shell" lang={locale === 'zh' ? 'zh-CN' : 'en'}>
@@ -2014,27 +2102,25 @@ function App() {
             <Panel title={t.marketDataVendors} icon={<Database size={17} />}>
               <p className="hint">{t.marketDataHint}</p>
               <div className="market-data-list">
-                {metadata.stockMarkets.map((market) => {
-                  const override = marketDataOverride(config, market.key);
-                  const hasOverride =
-                    Object.keys(override.dataVendors ?? {}).length > 0 ||
-                    Object.keys(override.toolVendors ?? {}).length > 0 ||
-                    Object.keys(override.customDataInterfaces ?? {}).length > 0;
+                {marketDataSections.map((section) => {
+                  const hasOverride = marketGroupHasOverride(section.markets);
+                  const sectionMarket = section.markets[0];
                   return (
-                    <details key={market.key} className={hasOverride ? 'market-data-section active' : 'market-data-section'} open={market.key === config.stockMarket || hasOverride}>
+                    <details key={section.key} className={hasOverride ? 'market-data-section active' : 'market-data-section'} open={section.markets.includes(config.stockMarket) || hasOverride}>
                       <summary>
-                        <span>{marketLabel(market.key, locale)}</span>
+                        <span>{section.label}</span>
                         <small>{hasOverride ? t.marketOverrideConfigured : t.inheritDefault}</small>
                       </summary>
                       <div className="market-data-body">
                         {metadata.dataVendorCategories.map((category) => {
                           const inherited = config.dataVendors[category.key] ?? '';
+                          const value = sharedMarketValue(section.markets, (market) => marketDataOverride(config, market).dataVendors?.[category.key]);
                           return (
-                            <label key={`${market.key}-${category.key}`} className="field">
+                            <label key={`${section.key}-${category.key}`} className="field">
                               <span>{dataVendorLabels[locale][category.key] ?? category.label}</span>
-                              <select value={override.dataVendors?.[category.key] ?? ''} onChange={(event) => updateMarketVendor(market.key, category.key, event.target.value)}>
+                              <select value={value} onChange={(event) => updateMarketGroupVendor(section.markets, category.key, event.target.value)}>
                                 <option value="">{t.inheritDefault} ({dataVendorOptionLabel(inherited, locale)})</option>
-                                {vendorOptions(category.options, { category: category.key, market: market.key }).map((option) => (
+                                {vendorOptions(category.options, { category: category.key, market: sectionMarket }).map((option) => (
                                   <option key={option} value={option}>
                                     {dataVendorOptionLabel(option, locale)}
                                   </option>
@@ -2050,16 +2136,18 @@ function App() {
                         <div className="method-vendor-list">
                           {metadata.customDataMethods.map((method) => {
                             const category = metadata.dataVendorCategories.find((item) => item.key === method.category);
-                            const inherited = override.dataVendors?.[method.category] ?? config.dataVendors[method.category] ?? '';
+                            const inheritedOverride = sharedMarketValue(section.markets, (market) => marketDataOverride(config, market).dataVendors?.[method.category]);
+                            const inherited = inheritedOverride || config.dataVendors[method.category] || '';
+                            const value = sharedMarketValue(section.markets, (market) => marketDataOverride(config, market).toolVendors?.[method.method]);
                             return (
-                              <label key={`${market.key}-${method.method}`} className="field method-vendor-row">
+                              <label key={`${section.key}-${method.method}`} className="field method-vendor-row">
                                 <span>
                                   {customMethodLabels[locale][method.method] ?? method.label}
                                   <small>{dataVendorLabels[locale][method.category] ?? category?.label ?? method.category}</small>
                                 </span>
-                                <select value={override.toolVendors?.[method.method] ?? ''} onChange={(event) => updateMarketMethodVendor(market.key, method.method, event.target.value)}>
+                                <select value={value} onChange={(event) => updateMarketGroupMethodVendor(section.markets, method.method, event.target.value)}>
                                   <option value="">{t.inheritDefault} ({dataVendorOptionLabel(inherited, locale)})</option>
-                                  {vendorOptions(category?.options ?? [], { category: method.category, method: method.method, market: market.key }).map((option) => (
+                                  {vendorOptions(category?.options ?? [], { category: method.category, method: method.method, market: sectionMarket }).map((option) => (
                                     <option key={option} value={option}>
                                       {dataVendorOptionLabel(option, locale)}
                                     </option>
@@ -2072,28 +2160,26 @@ function App() {
                         <div className="custom-interface-list market-custom-interface-list">
                           {metadata.dataVendorCategories.map((category) => {
                             const methods = metadata.customDataMethods.filter((method) => method.category === category.key);
-                            const selectedCustom =
-                              isCustomLikeDataVendor(override.dataVendors?.[category.key]) ||
-                              methods.some((method) => isCustomLikeDataVendor(override.toolVendors?.[method.method]));
+                            const selectedCustom = marketGroupUsesCustomRoute(section.markets, category.key, methods);
                             if (!selectedCustom) return null;
-                            const settings = override.customDataInterfaces?.[category.key] ?? { baseUrl: null, endpoints: {} };
+                            const settings = marketGroupCustomSettings(section.markets, category.key);
                             return (
-                              <section key={`${market.key}-${category.key}-custom`} className="custom-interface active">
+                              <section key={`${section.key}-${category.key}-custom`} className="custom-interface active">
                                 <label className="field">
-                                  <span>{dataVendorLabels[locale][category.key] ?? category.label}</span>
+                                  <span>{dataVendorLabels[locale][category.key] ?? category.label} · {t.baseUrl}</span>
                                   <input
                                     value={settings.baseUrl ?? ''}
-                                    onChange={(event) => updateMarketCustomBaseUrl(market.key, category.key, event.target.value)}
+                                    onChange={(event) => updateMarketGroupCustomBaseUrl(section.markets, category.key, event.target.value)}
                                     placeholder="https://data.example.com"
                                   />
                                 </label>
                                 <div className="endpoint-grid">
                                   {methods.map((method) => (
-                                    <label key={`${market.key}-${method.method}-endpoint`} className="field">
+                                    <label key={`${section.key}-${method.method}-endpoint`} className="field">
                                       <span>{customMethodLabels[locale][method.method] ?? method.label}</span>
                                       <input
                                         value={settings.endpoints?.[method.method] ?? method.defaultPath}
-                                        onChange={(event) => updateMarketCustomEndpoint(market.key, category.key, method.method, event.target.value)}
+                                        onChange={(event) => updateMarketGroupCustomEndpoint(section.markets, category.key, method.method, event.target.value)}
                                         placeholder={t.endpointPath}
                                       />
                                     </label>
