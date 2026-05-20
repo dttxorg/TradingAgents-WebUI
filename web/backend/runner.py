@@ -641,7 +641,14 @@ class RunManager:
     def _settle_billing(self, run: RunRecord, status: str) -> None:
         if run.billing_settled:
             return
-        run.billing = self.storage.settle_analysis_order(run.order_id, run.config, run.stats, status) or run.billing
+        run.billing = self.storage.settle_analysis_order(
+            run.order_id,
+            run.config,
+            run.stats,
+            status,
+            error_summary=run.error,
+            error_stage="analysis",
+        ) or run.billing
         run.billing_settled = True
 
     def _enqueue_next_run(self, run: RunRecord) -> None:

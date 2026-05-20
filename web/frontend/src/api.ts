@@ -6,6 +6,7 @@ import type {
   BacktestTickerSummary,
   BatchRunResponse,
   BootstrapStatus,
+  AnalysisEstimate,
   HistoricalReport,
   Metadata,
   ModelFetchResponse,
@@ -133,6 +134,11 @@ export const api = {
       body: JSON.stringify({ provider, baseUrl }),
     }),
   publicPricing: () => request<PublicPricing>('/api/billing/pricing/public'),
+  estimateRun: (config: WebConfig, runCount: number) =>
+    request<AnalysisEstimate>('/api/billing/estimate', {
+      method: 'POST',
+      body: JSON.stringify({ config, runCount }),
+    }),
   orders: (limit = 100) => request<OrderListResponse>(`/api/billing/orders?limit=${limit}`),
   adminUsers: () => request<UserListResponse>('/api/admin/users'),
   adminCreateUser: (payload: { username: string; password: string; displayName?: string | null; role: 'admin' | 'user'; initialBalance: string; isActive?: boolean }) =>

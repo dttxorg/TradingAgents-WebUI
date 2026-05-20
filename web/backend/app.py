@@ -4,11 +4,12 @@ import asyncio
 import json
 import queue
 import os
+import shutil
 from pathlib import Path
 from typing import AsyncIterator
 
 from dotenv import load_dotenv
-from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Response
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from requests import RequestException
@@ -19,6 +20,8 @@ from .constants import metadata_payload
 from .model_discovery import fetch_provider_models
 from .runner import RunManager
 from .schemas import (
+    AnalysisEstimateRequest,
+    AnalysisEstimateResponse,
     AdminUserCreate,
     AdminUserUpdate,
     BacktestRecord,
@@ -51,8 +54,43 @@ storage.load_secrets_into_env()
 run_manager = RunManager(storage)
 backtest_scheduler = BacktestScheduler(storage)
 
-app = FastAPI(title="TradingAgents Web API", version="0.1.0")
+app = FastAPI(
+    title="TradingAgents Web API",
+    version="0.1.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 backtest_scheduler.start()
+
+
+SECURITY_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob:; "
+        "font-src 'self' data:; "
+        "connect-src 'self'; "
+        "base-uri 'self'; "
+        "form-action 'self'; "
+        "frame-ancestors 'none'"
+    ),
+    "X-Frame-Options": "DENY",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+}
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    for key, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(key, value)
+    if request.url.scheme == "https" or os.getenv("TRADINGAGENTS_ENABLE_HSTS", "0").lower() in {"1", "true", "yes"}:
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
 
 
 def _cookie_secure() -> bool:
@@ -86,6 +124,23 @@ def admin_user(user: UserPublic = Depends(current_user)) -> UserPublic:
     if user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin permission required.")
     return user
+
+
+def visible_config(config: WebConfig, user: UserPublic) -> WebConfig:
+    if user.role == "admin":
+        return config
+    sanitized = config.model_copy(deep=True)
+    sanitized.backend_url = None
+    for route in sanitized.llm_routes.values():
+        route.backend_url = None
+    for settings in sanitized.custom_data_interfaces.values():
+        settings.base_url = None
+        settings.endpoints = {}
+    for override in sanitized.market_data_overrides.values():
+        for settings in override.custom_data_interfaces.values():
+            settings.base_url = None
+            settings.endpoints = {}
+    return sanitized
 
 
 def user_run_config(request: RunRequest, user: UserPublic) -> RunRequest:
@@ -137,8 +192,37 @@ def backtest_records_payload(records: list[BacktestRecord], skipped_completed: i
 
 
 @app.get("/api/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> dict:
+    root = storage.root
+    disk = shutil.disk_usage(root)
+    users_ok = storage.users_path.exists()
+    checks = {
+        "storage": {"status": "ok" if root.exists() else "error", "path": str(root)},
+        "users": {"status": "ok" if users_ok else "empty"},
+        "queue": {"status": "ok", "pending": run_manager.pending.qsize()},
+        "disk": {
+            "status": "ok" if disk.free > 250 * 1024 * 1024 else "warn",
+            "freeBytes": disk.free,
+        },
+        "apiKeys": {
+            "status": "ok",
+            "configuredCount": sum(1 for item in storage.secret_status().values() if item.configured),
+        },
+    }
+    status = "ok" if all(check["status"] != "error" for check in checks.values()) else "error"
+    return {"status": status, "checks": checks}
+
+
+@app.get("/docs", include_in_schema=False)
+@app.get("/redoc", include_in_schema=False)
+@app.get("/openapi.json", include_in_schema=False)
+def public_api_docs_disabled() -> None:
+    raise HTTPException(status_code=404, detail="API documentation is not public.")
+
+
+@app.get("/api/admin/openapi.json", include_in_schema=False)
+def admin_openapi(_: UserPublic = Depends(admin_user)) -> dict:
+    return app.openapi()
 
 
 @app.get("/api/auth/bootstrap/status")
@@ -244,8 +328,8 @@ def get_metadata() -> dict:
 
 
 @app.get("/api/config")
-def get_config(_: UserPublic = Depends(current_user)) -> dict:
-    return storage.load_config().model_dump(mode="json", by_alias=True)
+def get_config(user: UserPublic = Depends(current_user)) -> dict:
+    return visible_config(storage.load_config(), user).model_dump(mode="json", by_alias=True)
 
 
 @app.put("/api/config")
@@ -260,6 +344,24 @@ def get_secret_status(_: UserPublic = Depends(admin_user)) -> dict:
         key: value.model_dump(mode="json", by_alias=True)
         for key, value in storage.secret_status().items()
     }
+
+
+@app.post("/api/billing/estimate")
+def estimate_analysis(request: AnalysisEstimateRequest, user: UserPublic = Depends(current_user)) -> dict:
+    config = request.config if user.role == "admin" else user_run_config(RunRequest(ticker=request.config.ticker, config=request.config), user).config
+    pricing = storage.load_pricing()
+    per_run_estimate = storage.estimate_analysis_amount(config, pricing)
+    per_run_preauth = storage.estimate_preauthorization(config, pricing)
+    return AnalysisEstimateResponse(
+        currency=pricing.currency,
+        runCount=request.run_count,
+        estimatedAmount=per_run_estimate * request.run_count,
+        preauthorizedAmount=per_run_preauth * request.run_count,
+        modelProvider=config.llm_provider,
+        quickModel=config.quick_think_llm,
+        deepModel=config.deep_think_llm,
+        maxParallelRuns=config.max_parallel_runs,
+    ).model_dump(mode="json", by_alias=True)
 
 
 @app.put("/api/secrets")

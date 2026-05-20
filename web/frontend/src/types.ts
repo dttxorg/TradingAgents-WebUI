@@ -166,6 +166,9 @@ export type OrderRecord = {
   runId?: string | null;
   externalOrderId?: string | null;
   description?: string | null;
+  errorStage?: string | null;
+  errorSummary?: string | null;
+  chargedOnFailure: boolean;
   usage: TokenUsage;
   pricingSnapshot: Record<string, unknown>;
   createdAt: string;
@@ -174,6 +177,17 @@ export type OrderRecord = {
 
 export type OrderListResponse = {
   orders: OrderRecord[];
+};
+
+export type AnalysisEstimate = {
+  currency: string;
+  runCount: number;
+  preauthorizedAmount: string;
+  estimatedAmount: string;
+  modelProvider: string;
+  quickModel: string;
+  deepModel: string;
+  maxParallelRuns: number;
 };
 
 export type UserListResponse = {

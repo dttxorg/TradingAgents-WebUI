@@ -240,6 +240,7 @@ def test_auth_bootstrap_login_and_role_permissions(monkeypatch, tmp_path):
     assert bootstrap.status_code == 200
     assert bootstrap.json()["user"]["role"] == "admin"
     assert client.get("/api/auth/me").json()["user"]["balance"] == "25.000000"
+    assert client.get("/api/admin/openapi.json").status_code == 200
 
     created = client.post(
         "/api/admin/users",
@@ -251,8 +252,38 @@ def test_auth_bootstrap_login_and_role_permissions(monkeypatch, tmp_path):
     client.post("/api/auth/logout")
     login = client.post("/api/auth/login", json={"username": "alice", "password": "password123"})
     assert login.status_code == 200
-    assert client.get("/api/config").status_code == 200
+    storage.save_config(WebConfig(
+        backendUrl="http://10.0.0.1:9999/v1",
+        llmRoutes={"market_analyst": {"enabled": True, "backendUrl": "http://10.0.0.2:9999/v1"}},
+        customDataInterfaces={"news_data": {"baseUrl": "http://10.0.0.3:9999/api", "endpoints": {"get_news": "/news"}}},
+    ))
+    user_config = client.get("/api/config")
+    assert user_config.status_code == 200
+    assert user_config.json()["backendUrl"] is None
+    assert user_config.json()["llmRoutes"]["market_analyst"]["backendUrl"] is None
+    assert user_config.json()["customDataInterfaces"]["news_data"]["baseUrl"] is None
     assert client.get("/api/secrets/status").status_code == 403
+    assert client.get("/api/admin/openapi.json").status_code == 403
+
+
+def test_billing_estimate_endpoint_requires_login_and_returns_preauth(monkeypatch, tmp_path):
+    storage = WebStorage(tmp_path)
+    monkeypatch.setattr(app_module, "storage", storage)
+    client = TestClient(app)
+    payload = {"config": WebConfig().model_dump(mode="json", by_alias=True), "runCount": 1}
+
+    assert client.post("/api/billing/estimate", json=payload).status_code == 401
+
+    login_test_admin(client, storage, monkeypatch)
+    response = client.post(
+        "/api/billing/estimate",
+        json={"config": WebConfig(ticker="SPY", researchDepth=1).model_dump(mode="json", by_alias=True), "runCount": 2},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["runCount"] == 2
+    assert response.json()["preauthorizedAmount"] == "0.750000"
+    assert response.json()["modelProvider"] == WebConfig().llm_provider
 
 
 def test_billing_preauthorizes_settles_and_recharges(tmp_path):
@@ -285,9 +316,24 @@ def test_billing_preauthorizes_settles_and_recharges(tmp_path):
     assert after_settle.balance == Decimal("9.994000")
     assert after_settle.frozen_balance == Decimal("0.000000")
 
+    failed_billing = storage.preauthorize_analysis(user.id, "22222222-2222-4222-8222-222222222222", config)
+    storage.settle_analysis_order(
+        failed_billing.order_id,
+        config,
+        {"tokens_in": 1000, "tokens_out": 1000, "llm_calls": 2, "tool_calls": 1},
+        "failed",
+        error_stage="analysis",
+        error_summary="Provider timeout",
+    )
+    failed_order = storage.list_orders(user_id=user.id).orders[0]
+    assert failed_order.status == "failed_settled"
+    assert failed_order.error_stage == "analysis"
+    assert failed_order.error_summary == "Provider timeout"
+    assert failed_order.charged_on_failure is True
+
     recharge = storage.create_recharge_order(user.id, RechargeRequest(amount=Decimal("5.00")))
     assert recharge.status == "completed"
-    assert storage.get_user(user.id).balance == Decimal("14.994000")  # type: ignore[union-attr]
+    assert storage.get_user(user.id).balance == Decimal("14.988000")  # type: ignore[union-attr]
 
 
 def test_pricing_supports_per_run_depth_prices():
@@ -1119,8 +1165,17 @@ def test_openai_custom_base_url_uses_compatible_runtime(monkeypatch, tmp_path):
 def test_health_and_metadata_endpoints():
     client = TestClient(app)
 
-    assert client.get("/api/health").json() == {"status": "ok"}
+    health = client.get("/api/health")
+    assert health.status_code == 200
+    assert health.json()["status"] == "ok"
+    assert "checks" in health.json()
+    assert health.headers["X-Content-Type-Options"] == "nosniff"
+    assert health.headers["X-Frame-Options"] == "DENY"
+    assert "frame-ancestors 'none'" in health.headers["Content-Security-Policy"]
     assert client.get("/api/metadata").status_code == 200
+    assert client.get("/docs").status_code == 404
+    assert client.get("/redoc").status_code == 404
+    assert client.get("/openapi.json").status_code == 404
 
 
 def test_batch_run_endpoint_queues_runs_in_order(monkeypatch, tmp_path):

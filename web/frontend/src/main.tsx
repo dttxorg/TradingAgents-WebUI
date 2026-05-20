@@ -1,7 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import ReactMarkdown, { type Components } from 'react-markdown';
+import rehypeSanitize from 'rehype-sanitize';
+import remarkGfm from 'remark-gfm';
 import {
   Activity,
+  ArrowUp,
   BadgeCheck,
   BarChart3,
   Bot,
@@ -9,8 +13,12 @@ import {
   Check,
   CircleAlert,
   CircleDot,
+  Copy,
   CreditCard,
   Database,
+  Download,
+  FileText,
+  Filter,
   Gauge,
   History,
   KeyRound,
@@ -21,9 +29,11 @@ import {
   Loader2,
   Maximize2,
   Play,
+  Printer,
   RefreshCw,
   ReceiptText,
   Save,
+  Search,
   Server,
   Settings2,
   Square,
@@ -35,6 +45,7 @@ import {
 } from 'lucide-react';
 import { api } from './api';
 import type {
+  AnalysisEstimate,
   BacktestRecord,
   BacktestScheduleConfig,
   BacktestTickerSummary,
@@ -75,6 +86,8 @@ import './styles.css';
 
 type Locale = 'en' | 'zh';
 type ViewMode = 'workspace' | 'settings';
+type SettingsSection = 'model' | 'market' | 'data' | 'routes' | 'backtest' | 'billing' | 'users';
+type HistoryFilters = { query: string; ticker: string; status: string; provider: string; date: string };
 type ImportMetaWithEnv = ImportMeta & { env?: Record<string, string | undefined> };
 
 const LONGBRIDGE_PROXY_ENV =
@@ -91,6 +104,13 @@ const messages = {
     stopAnalysis: 'Stop analysis',
     workspace: 'Workspace',
     settings: 'Settings',
+    settingsModelTab: 'Model',
+    settingsMarketTab: 'Market',
+    settingsDataTab: 'Data sources',
+    settingsRoutesTab: 'Routing',
+    settingsBacktestTab: 'Reviews',
+    settingsBillingTab: 'Billing',
+    settingsUsersTab: 'Users',
     activeWorkflow: 'Active workflow',
     configuredAgents: 'Configured agents',
     dataRouteCount: 'Data routes',
@@ -184,6 +204,16 @@ const messages = {
     openReportReader: 'Open reader',
     closeReportReader: 'Close reader',
     currentSection: 'Current section',
+    tableOfContents: 'Contents',
+    reportSearch: 'Search report',
+    searchMatches: 'matches',
+    copyMarkdown: 'Copy Markdown',
+    exportMarkdown: 'Export Markdown',
+    exportPdf: 'Print / PDF',
+    backToTop: 'Back to top',
+    reportCopied: 'Report copied',
+    reportDownloaded: 'Markdown exported',
+    readingProgress: 'Reading progress',
     noReportLoaded: 'No report loaded',
     backtestWatch: 'Backtest watch',
     backtestSchedule: 'Backtest schedule',
@@ -252,6 +282,15 @@ const messages = {
     inputTokens: 'Input',
     outputTokens: 'Output',
     orders: 'Orders',
+    orderTypeAnalysis: 'Analysis',
+    orderTypeRecharge: 'Recharge',
+    orderTypeAdjustment: 'Adjustment',
+    failureStage: 'Failed stage',
+    errorSummary: 'Error',
+    chargedOnFailure: 'Charged on failure',
+    viewRun: 'View run',
+    yes: 'Yes',
+    no: 'No',
     adminBilling: 'Admin / Billing',
     adminUsers: 'Admin / Users',
     recharge: 'Recharge',
@@ -280,6 +319,19 @@ const messages = {
     failed: 'failed',
     cancelled: 'cancelled',
     skipped: 'skipped',
+    preauthorized: 'preauthorized',
+    settled: 'settled',
+    failed_settled: 'failed after settlement',
+    completed: 'completed',
+    voided: 'voided',
+    confirmRunTitle: 'Confirm analysis cost',
+    confirmRunBody: 'Review the estimated freeze before starting this analysis.',
+    estimatedCharge: 'Estimated charge',
+    estimatedFreeze: 'Estimated freeze',
+    runCount: 'Runs',
+    workerCount: 'Workers',
+    confirmStart: 'Confirm and start',
+    cancel: 'Cancel',
   },
   zh: {
     loading: '正在加载 TradingAgents 控制台',
@@ -289,6 +341,13 @@ const messages = {
     stopAnalysis: '停止分析',
     workspace: '工作台',
     settings: '设置',
+    settingsModelTab: '模型',
+    settingsMarketTab: '市场',
+    settingsDataTab: '数据源',
+    settingsRoutesTab: '路由',
+    settingsBacktestTab: '复盘',
+    settingsBillingTab: '计费',
+    settingsUsersTab: '用户',
     activeWorkflow: '当前工作流',
     configuredAgents: '已配置智能体',
     dataRouteCount: '数据路由',
@@ -336,9 +395,9 @@ const messages = {
     analysts: '分析师团队',
     openaiReasoning: 'OpenAI 推理强度',
     geminiThinking: 'Gemini 思考模式',
-    anthropicEffort: 'Anthropic Effort',
-    deepseekThinkingMode: 'DeepSeek Thinking Mode',
-    deepseekThinkingHint: '建议在 TradingAgents 工具调用工作流中选择 Disabled，避免 DeepSeek reasoning_content 回传错误。Enabled 需要客户端在工具调用期间回传 reasoning_content，OpenAI-compatible agent 框架可能失败。',
+    anthropicEffort: 'Anthropic 推理强度',
+    deepseekThinkingMode: 'DeepSeek 思考模式',
+    deepseekThinkingHint: '建议设为“禁用”，避免工具调用期间 reasoning_content 回传错误；只有客户端能完整回传 reasoning_content 时再启用。',
     checkpointResume: '启用断点续跑',
     parallelRuns: '单股票任务 worker 数',
     saveDefaults: '保存默认配置',
@@ -382,6 +441,16 @@ const messages = {
     openReportReader: '打开阅读器',
     closeReportReader: '关闭阅读器',
     currentSection: '当前章节',
+    tableOfContents: '目录',
+    reportSearch: '搜索报告',
+    searchMatches: '处匹配',
+    copyMarkdown: '复制 Markdown',
+    exportMarkdown: '导出 Markdown',
+    exportPdf: '打印 / 导出 PDF',
+    backToTop: '回到顶部',
+    reportCopied: '报告 Markdown 已复制',
+    reportDownloaded: 'Markdown 已导出',
+    readingProgress: '阅读进度',
     noReportLoaded: '暂无报告内容',
     backtestWatch: '回测观察',
     backtestSchedule: '复盘周期',
@@ -450,6 +519,15 @@ const messages = {
     inputTokens: '输入',
     outputTokens: '输出',
     orders: '订单',
+    orderTypeAnalysis: '分析',
+    orderTypeRecharge: '充值',
+    orderTypeAdjustment: '调整',
+    failureStage: '失败阶段',
+    errorSummary: '错误摘要',
+    chargedOnFailure: '失败后是否扣费',
+    viewRun: '查看运行',
+    yes: '是',
+    no: '否',
     adminBilling: '管理员 / 计费',
     adminUsers: '管理员 / 用户',
     recharge: '充值',
@@ -478,6 +556,19 @@ const messages = {
     failed: '失败',
     cancelled: '已停止',
     skipped: '已跳过',
+    preauthorized: '已预冻结',
+    settled: '已结算',
+    failed_settled: '失败已结算',
+    completed: '已完成',
+    voided: '已作废',
+    confirmRunTitle: '确认分析费用',
+    confirmRunBody: '开始前请确认预计冻结金额、模型和任务数量，避免误点消耗额度。',
+    estimatedCharge: '预计费用',
+    estimatedFreeze: '预计冻结',
+    runCount: '任务数',
+    workerCount: 'Worker 数',
+    confirmStart: '确认并开始',
+    cancel: '取消',
   },
 };
 
@@ -605,6 +696,7 @@ function today() {
 function App() {
   const [locale, setLocale] = useState<Locale>(detectLocale);
   const [activeView, setActiveView] = useState<ViewMode>('workspace');
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('model');
   const [authChecked, setAuthChecked] = useState(false);
   const [bootstrapRequired, setBootstrapRequired] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -634,18 +726,28 @@ function App() {
   const [viewedArchive, setViewedArchive] = useState<HistoricalReport | null>(null);
   const [history, setHistory] = useState<ReportHistoryItem[]>([]);
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
+  const [historyFilters, setHistoryFilters] = useState<HistoryFilters>({ query: '', ticker: '', status: '', provider: '', date: '' });
   const [reportTab, setReportTab] = useState('finalReport');
+  const [reportSearch, setReportSearch] = useState('');
+  const [reportProgress, setReportProgress] = useState(0);
   const [isReaderOpen, setReaderOpen] = useState(false);
+  const [pendingRun, setPendingRun] = useState<{ config: WebConfig; tickers: string[]; estimate: AnalysisEstimate } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [isSaving, setSaving] = useState(false);
   const [isRunning, setRunning] = useState(false);
+  const [isEstimatingRun, setEstimatingRun] = useState(false);
   const [isFetchingModels, setFetchingModels] = useState(false);
   const [isBacktestRunning, setBacktestRunning] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const reportViewRef = useRef<HTMLElement | null>(null);
 
   const t = messages[locale];
   const isAdmin = currentUser?.role === 'admin';
+
+  useEffect(() => {
+    document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en';
+  }, [locale]);
 
   async function loadWorkspaceData(user: User) {
     setError(null);
@@ -769,6 +871,11 @@ function App() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isReaderOpen]);
+
+  useEffect(() => {
+    setReportProgress(0);
+    reportViewRef.current?.scrollTo({ top: 0 });
+  }, [reportTab, selectedHistoryId, activeRun?.id, viewedArchive?.run.id]);
 
   function changeLocale(value: Locale) {
     setLocale(value);
@@ -1188,6 +1295,23 @@ function App() {
       return;
     }
     const runConfig = configForBackend({ ...config, ticker: tickers[0] }, longbridgeProxyBaseUrl, metadata.customDataMethods, currentAshareFundamentalsBaseUrl);
+    setEstimatingRun(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const estimate = await api.estimateRun(runConfig, tickers.length);
+      setPendingRun({ config: runConfig, tickers, estimate });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setEstimatingRun(false);
+    }
+  }
+
+  async function confirmPendingRun() {
+    if (!pendingRun) return;
+    const { config: runConfig, tickers } = pendingRun;
+    setPendingRun(null);
     setRunning(true);
     setError(null);
     setEvents([]);
@@ -1314,6 +1438,14 @@ function App() {
     setReportTab('finalReport');
   }
 
+  function viewOrderRun(runId: string) {
+    if (history.some((item) => item.runId === runId)) {
+      void loadHistoricalReport(runId);
+      return;
+    }
+    void selectLiveRun(runId);
+  }
+
   async function selectLiveRun(runId: string) {
     setError(null);
     setSelectedHistoryId(null);
@@ -1384,6 +1516,14 @@ function App() {
   const runBilling = displayedRun?.billing ?? activeRun?.billing ?? null;
   const reportEntries = displayedReports?.reports ? Object.entries(displayedReports.reports) : [];
   const backtestObservation = buildBacktestObservation(displayedReports, displayedRun, outputLocale);
+  const referenceTimeline = metadata.llmRouteTargets
+    .filter((target) => target.stage === 'reference')
+    .filter((target) => !Object.keys(agentStatus).some((name) => name.toLowerCase().includes(target.key.replace('_reviewer', ''))))
+    .map((target) => ({
+      key: target.key,
+      label: routeLabel(target.label, outputLocale),
+      status: activeRun ? 'pending' : 'idle',
+    }));
   const dataApiSecretFields = metadata.secretFields.filter((field) => ['ALPHA_VANTAGE_API_KEY', 'CUSTOM_DATA_API_KEY'].includes(field));
   const reportTabs = [
     { key: 'finalReport', label: t.final },
@@ -1391,6 +1531,24 @@ function App() {
     ...reportEntries.map(([key]) => ({ key, label: reportLabels[locale][key] ?? cleanLabel(key) })),
   ];
   const activeReportTitle = reportTabs.find((item) => item.key === reportTab)?.label ?? t.noReportLoaded;
+  const activeReportMarkdown =
+    reportTab === 'finalReport'
+      ? displayedReports?.finalReport ?? t.noReport
+      : stringifyReport(displayedReports?.reports?.[reportTab], t.noReport);
+  const reportHeadings = reportTab === 'backtestWatch' ? [] : extractMarkdownHeadings(activeReportMarkdown);
+  const reportSearchMatches = reportTab === 'backtestWatch' || !reportSearch.trim()
+    ? 0
+    : countTextMatches(activeReportMarkdown, reportSearch);
+  const filteredHistory = history.filter((item) => matchesHistoryFilters(item, historyFilters));
+  const settingsTabs: Array<{ key: SettingsSection; label: string; icon: React.ReactNode }> = [
+    { key: 'model', label: t.settingsModelTab, icon: <Settings2 size={15} /> },
+    { key: 'market', label: t.settingsMarketTab, icon: <BarChart3 size={15} /> },
+    { key: 'data', label: t.settingsDataTab, icon: <Database size={15} /> },
+    { key: 'routes', label: t.settingsRoutesTab, icon: <Activity size={15} /> },
+    { key: 'backtest', label: t.settingsBacktestTab, icon: <History size={15} /> },
+    { key: 'billing', label: t.settingsBillingTab, icon: <CreditCard size={15} /> },
+    { key: 'users', label: t.settingsUsersTab, icon: <Users size={15} /> },
+  ];
   const reportContext = displayedReports ? (
     <div className="report-context">
       <strong>
@@ -1404,8 +1562,34 @@ function App() {
       )}
     </div>
   ) : null;
+  const handleReportScroll = (event: React.UIEvent<HTMLElement>) => {
+    const target = event.currentTarget;
+    const maxScroll = target.scrollHeight - target.clientHeight;
+    setReportProgress(maxScroll <= 0 ? 100 : Math.round((target.scrollTop / maxScroll) * 100));
+  };
+  const copyActiveReport = async () => {
+    try {
+      await navigator.clipboard.writeText(activeReportMarkdown);
+      setNotice(t.reportCopied);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const downloadActiveReport = () => {
+    const blob = new Blob([activeReportMarkdown], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = reportFileName(displayedRun?.ticker ?? displayedReports?.runId ?? 'report', reportTab);
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setNotice(t.reportDownloaded);
+  };
+  const scrollReportToTop = () => {
+    reportViewRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  };
   const renderReportBody = () => (
-    <article className="report-view">
+    <article className="report-view" ref={reportViewRef} onScroll={handleReportScroll}>
       {reportTab === 'backtestWatch' ? (
         <BacktestObservationView
           observation={backtestObservation}
@@ -1417,7 +1601,11 @@ function App() {
           isRunning={isBacktestRunning}
         />
       ) : (
-        <pre>{reportTab === 'finalReport' ? displayedReports?.finalReport ?? t.noReport : stringifyReport(displayedReports?.reports?.[reportTab], t.noReport)}</pre>
+        <div className="markdown-report">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={markdownComponents}>
+            {activeReportMarkdown}
+          </ReactMarkdown>
+        </div>
       )}
     </article>
   );
@@ -1437,10 +1625,59 @@ function App() {
       </nav>
       <div className="report-reader-main">
         <div className="report-toolbar">
-          <span>{t.currentSection}</span>
-          <strong>{activeReportTitle}</strong>
+          <div className="report-toolbar-title">
+            <span>{t.currentSection}</span>
+            <strong>{activeReportTitle}</strong>
+          </div>
+          {reportTab !== 'backtestWatch' && (
+            <div className="report-actions">
+              <label className="report-search">
+                <Search size={15} />
+                <input
+                  value={reportSearch}
+                  onChange={(event) => setReportSearch(event.target.value)}
+                  placeholder={t.reportSearch}
+                />
+                {reportSearch.trim() && <small>{reportSearchMatches} {t.searchMatches}</small>}
+              </label>
+              <button className="icon-button" onClick={copyActiveReport} aria-label={t.copyMarkdown} title={t.copyMarkdown}>
+                <Copy size={15} />
+              </button>
+              <button className="icon-button" onClick={downloadActiveReport} aria-label={t.exportMarkdown} title={t.exportMarkdown}>
+                <Download size={15} />
+              </button>
+              <button className="icon-button" onClick={() => window.print()} aria-label={t.exportPdf} title={t.exportPdf}>
+                <Printer size={15} />
+              </button>
+              <button className="icon-button" onClick={scrollReportToTop} aria-label={t.backToTop} title={t.backToTop}>
+                <ArrowUp size={15} />
+              </button>
+            </div>
+          )}
         </div>
-        {renderReportBody()}
+        <div className="reader-progress" aria-label={`${t.readingProgress}: ${reportProgress}%`}>
+          <span style={{ width: `${reportProgress}%` }} />
+        </div>
+        <div className={reportHeadings.length > 0 ? 'report-content-layout has-toc' : 'report-content-layout'}>
+          {reportHeadings.length > 0 && (
+            <aside className="report-toc" aria-label={t.tableOfContents}>
+              <div className="report-toc-title">
+                <FileText size={15} />
+                {t.tableOfContents}
+              </div>
+              {reportHeadings.map((heading) => (
+                <button
+                  key={`${heading.id}-${heading.index}`}
+                  className={`depth-${heading.depth}`}
+                  onClick={() => document.getElementById(heading.id)?.scrollIntoView({ block: 'start', behavior: 'smooth' })}
+                >
+                  {heading.text}
+                </button>
+              ))}
+            </aside>
+          )}
+          {renderReportBody()}
+        </div>
       </div>
     </div>
   );
@@ -1519,8 +1756,8 @@ function App() {
           <button className="secondary" onClick={signOut}>
             {t.signOut}
           </button>
-          <button className="primary" onClick={startRun} disabled={isRunning}>
-            {isRunning ? <Loader2 className="spin" size={17} /> : <Play size={17} />}
+          <button className="primary" onClick={startRun} disabled={isRunning || isEstimatingRun}>
+            {isRunning || isEstimatingRun ? <Loader2 className="spin" size={17} /> : <Play size={17} />}
             {t.runAnalysis}
           </button>
           {isRunning && (
@@ -1546,8 +1783,22 @@ function App() {
       )}
 
       {activeView === 'settings' && isAdmin ? (
-        <section className="settings-grid">
+        <section className={`settings-grid settings-section-${settingsSection}`}>
           <section className="settings-main">
+            <nav className="settings-tabs" aria-label={t.settings}>
+              {settingsTabs.map((item) => (
+                <button
+                  key={item.key}
+                  className={settingsSection === item.key ? 'active' : ''}
+                  onClick={() => setSettingsSection(item.key)}
+                  aria-current={settingsSection === item.key ? 'page' : undefined}
+                >
+                  {item.icon}
+                  {item.label}
+                </button>
+              ))}
+            </nav>
+            {settingsSection === 'model' && (
             <Panel title={t.connectionSettings} icon={<Settings2 size={17} />}>
               <div className="form-grid settings-form">
                 <label className="field">
@@ -1666,7 +1917,9 @@ function App() {
                 </button>
               </div>
             </Panel>
+            )}
 
+            {settingsSection === 'market' && (
             <Panel title={t.marketSettings} icon={<BarChart3 size={17} />}>
               <p className="hint">
                 {locale === 'zh'
@@ -1728,7 +1981,9 @@ function App() {
                 </button>
               </div>
             </Panel>
+            )}
 
+            {settingsSection === 'data' && (
             <Panel title={t.dataVendors} icon={<Database size={17} />}>
               {metadata.dataVendorCategories.map((category) => (
                 <label key={category.key} className="field">
@@ -1769,7 +2024,9 @@ function App() {
                 })}
               </div>
             </Panel>
+            )}
 
+            {settingsSection === 'data' && (
             <Panel title={t.marketDataVendors} icon={<Database size={17} />}>
               <p className="hint">{t.marketDataHint}</p>
               {dataApiSecretFields.length > 0 && (
@@ -1887,7 +2144,9 @@ function App() {
                 })}
               </div>
             </Panel>
+            )}
 
+            {settingsSection === 'routes' && (
             <Panel title={t.parallelRoutes} icon={<Activity size={17} />}>
               <p className="hint">{t.parallelRoutesHint}</p>
               <div className="route-grid">
@@ -1973,7 +2232,9 @@ function App() {
                 </button>
               </div>
             </Panel>
+            )}
 
+            {settingsSection === 'backtest' && (
             <Panel title={t.backtestSchedule} icon={<History size={17} />}>
               {backtestConfig ? (
                 <div className="backtest-settings">
@@ -2080,9 +2341,11 @@ function App() {
                 <span className="empty">-</span>
               )}
             </Panel>
+            )}
           </section>
 
           <aside className="settings-side">
+            {settingsSection === 'billing' && (
             <Panel title={t.adminBilling} icon={<CreditCard size={17} />}>
               {adminPricing ? (
                 <div className="billing-form">
@@ -2156,7 +2419,9 @@ function App() {
                 <span className="empty">-</span>
               )}
             </Panel>
+            )}
 
+            {settingsSection === 'users' && (
             <Panel title={t.adminUsers} icon={<Users size={17} />}>
               <div className="new-user-grid">
                 <input placeholder={t.username} value={newUserDraft.username} onChange={(event) => setNewUserDraft((current) => ({ ...current, username: event.target.value }))} />
@@ -2189,7 +2454,9 @@ function App() {
                 ))}
               </div>
             </Panel>
+            )}
 
+            {settingsSection !== 'billing' && settingsSection !== 'users' && (
             <Panel title={t.setupRecommendations} icon={<Lightbulb size={17} />}>
               <div className="recommendation-list">
                 {setupRecommendations.map((item) => (
@@ -2201,6 +2468,7 @@ function App() {
                 {setupRecommendations.length === 0 && <span className="empty">{t.recommendationsOk}</span>}
               </div>
             </Panel>
+            )}
 
           </aside>
         </section>
@@ -2223,7 +2491,7 @@ function App() {
           <div className="overview-card price-card">
             <span>{t.pricingPublic}</span>
             <strong>{publicPricing ? `${publicPricing.billingMode} · x${publicPricing.tokenMultiplier}` : '-'}</strong>
-            <small>{publicPricing ? `${t.tokenPrice}: ${formatMoney(publicPricing.inputTokenPricePer1m, publicPricing.currency)}/${formatMoney(publicPricing.outputTokenPricePer1m, publicPricing.currency)} · ${t.fixedCharge}: ${formatMoney(publicPricing.fixedRunPrice, publicPricing.currency)}` : '-'}</small>
+            <small>{publicPricing ? `${t.tokenPrice}: ${formatMoney(publicPricing.inputTokenPricePer1m, publicPricing.currency, 6)}/${formatMoney(publicPricing.outputTokenPricePer1m, publicPricing.currency, 6)} · ${t.fixedCharge}: ${formatMoney(publicPricing.fixedRunPrice, publicPricing.currency)}` : '-'}</small>
           </div>
           <Metric label={t.dataRouteCount} value={customRouteCount} />
           <Metric label={t.estimateTotal} value={timeEstimate.totalSeconds ? formatDuration(timeEstimate.totalSeconds, locale) : t.estimateWaiting} />
@@ -2432,7 +2700,14 @@ function App() {
                   <small>{statusLabel(status, outputLocale)}</small>
                 </span>
               ))}
-              {Object.keys(agentStatus).length === 0 && <span className="empty">{t.timelineEmpty}</span>}
+              {referenceTimeline.map((agent) => (
+                <span key={agent.key} className={`agent reference ${agent.status}`}>
+                  <BadgeCheck size={15} />
+                  {agent.label}
+                  <small>{statusLabel(agent.status, outputLocale)}</small>
+                </span>
+              ))}
+              {Object.keys(agentStatus).length === 0 && referenceTimeline.length === 0 && <span className="empty">{t.timelineEmpty}</span>}
             </div>
             <div className="metrics-row">
               <Metric label={t.llmCalls} value={progress?.stats?.llm_calls ?? activeRun?.stats?.llm_calls ?? 0} />
@@ -2473,8 +2748,42 @@ function App() {
 
         <aside className="right-rail">
           <Panel title={t.reportHistory} icon={<History size={17} />}>
+            <div className="history-filter-bar">
+              <label className="filter-input wide">
+                <Search size={14} />
+                <input
+                  value={historyFilters.query}
+                  onChange={(event) => setHistoryFilters((current) => ({ ...current, query: event.target.value }))}
+                  placeholder={t.reportSearch}
+                />
+              </label>
+              <label className="filter-input">
+                <Filter size={14} />
+                <input
+                  value={historyFilters.ticker}
+                  onChange={(event) => setHistoryFilters((current) => ({ ...current, ticker: event.target.value }))}
+                  placeholder={t.ticker}
+                />
+              </label>
+              <select value={historyFilters.status} onChange={(event) => setHistoryFilters((current) => ({ ...current, status: event.target.value }))}>
+                <option value="">{locale === 'zh' ? '状态' : 'Status'}</option>
+                {['succeeded', 'failed', 'cancelled', 'running', 'queued'].map((status) => (
+                  <option key={status} value={status}>{statusLabel(status, locale)}</option>
+                ))}
+              </select>
+              <input
+                type="date"
+                value={historyFilters.date}
+                onChange={(event) => setHistoryFilters((current) => ({ ...current, date: event.target.value }))}
+              />
+              <input
+                value={historyFilters.provider}
+                onChange={(event) => setHistoryFilters((current) => ({ ...current, provider: event.target.value }))}
+                placeholder={t.provider}
+              />
+            </div>
             <div className="history-list">
-              {history.map((item) => (
+              {filteredHistory.map((item) => (
                 <button
                   key={item.runId}
                   className={selectedHistoryId === item.runId ? 'history-row active' : 'history-row'}
@@ -2490,7 +2799,7 @@ function App() {
                   </span>
                 </button>
               ))}
-              {history.length === 0 && <span className="empty">{t.historyEmpty}</span>}
+              {filteredHistory.length === 0 && <span className="empty">{t.historyEmpty}</span>}
             </div>
           </Panel>
 
@@ -2499,12 +2808,25 @@ function App() {
               {orders.slice(0, 8).map((order) => (
                 <div key={order.id} className="order-row">
                   <span>
-                    <strong>{order.type}</strong>
-                    <small>{order.status} · {new Date(order.createdAt).toLocaleString()}</small>
+                    <strong>{orderTypeLabel(order.type, t)}</strong>
+                    <small>{statusLabel(order.status, locale)} · {new Date(order.createdAt).toLocaleString()}</small>
+                    {order.errorSummary && (
+                      <p className="order-error">{t.errorSummary}: {order.errorSummary}</p>
+                    )}
+                    {order.status === 'failed_settled' && (
+                      <small>
+                        {t.failureStage}: {order.errorStage ?? '-'} · {t.chargedOnFailure}: {order.chargedOnFailure ? t.yes : t.no}
+                      </small>
+                    )}
                   </span>
                   <span>
                     <em>{formatMoney(order.actualAmount || order.amount || order.frozenAmount, order.currency)}</em>
                     <small>{order.runId ? order.runId.slice(0, 8) : order.externalOrderId ?? '-'}</small>
+                    {order.runId && (
+                      <button className="text-button compact" onClick={() => viewOrderRun(order.runId!)}>
+                        {t.viewRun}
+                      </button>
+                    )}
                   </span>
                 </div>
               ))}
@@ -2539,6 +2861,43 @@ function App() {
               </div>
               {reportContext}
               {renderReportReader()}
+            </section>
+          </div>
+        )}
+        {pendingRun && (
+          <div className="reader-overlay" role="dialog" aria-modal="true" aria-label={t.confirmRunTitle}>
+            <section className="confirm-modal">
+              <div className="reader-modal-header">
+                <div>
+                  <span>{t.runAnalysis}</span>
+                  <strong>{t.confirmRunTitle}</strong>
+                </div>
+                <button className="icon-button" onClick={() => setPendingRun(null)} aria-label={t.cancel} title={t.cancel}>
+                  <X size={17} />
+                </button>
+              </div>
+              <p className="hint">{t.confirmRunBody}</p>
+              <div className="confirm-metrics">
+                <Metric label={t.estimatedFreeze} value={formatMoney(pendingRun.estimate.preauthorizedAmount, pendingRun.estimate.currency)} />
+                <Metric label={t.estimatedCharge} value={formatMoney(pendingRun.estimate.estimatedAmount, pendingRun.estimate.currency)} />
+                <Metric label={t.runCount} value={pendingRun.estimate.runCount} />
+                <Metric label={t.workerCount} value={pendingRun.estimate.maxParallelRuns} />
+              </div>
+              <div className="confirm-summary">
+                <span>{t.provider}: <strong>{pendingRun.estimate.modelProvider}</strong></span>
+                <span>{t.quickModel}: <strong>{pendingRun.estimate.quickModel}</strong></span>
+                <span>{t.deepModel}: <strong>{pendingRun.estimate.deepModel}</strong></span>
+                <span>{t.tickerList}: <strong>{pendingRun.tickers.join(', ')}</strong></span>
+              </div>
+              <div className="actions-row">
+                <button className="secondary" onClick={() => setPendingRun(null)}>
+                  {t.cancel}
+                </button>
+                <button className="primary" onClick={confirmPendingRun} disabled={isRunning}>
+                  <Play size={16} />
+                  {t.confirmStart}
+                </button>
+              </div>
             </section>
           </div>
         )}
@@ -2784,10 +3143,15 @@ function formatDuration(seconds: number, locale: Locale) {
   return locale === 'zh' ? `${minutes}分${remainingSeconds}秒` : `${minutes}m ${remainingSeconds}s`;
 }
 
-function formatMoney(value: string | number | null | undefined, currency = 'USD') {
+function formatMoney(value: string | number | null | undefined, currency = 'USD', fractionDigits = 4) {
   const amount = Number(value ?? 0);
-  if (!Number.isFinite(amount)) return `0.000000 ${currency}`;
-  return `${amount.toFixed(6)} ${currency}`;
+  const digits = Math.max(0, Math.min(6, fractionDigits));
+  if (!Number.isFinite(amount)) return `0 ${currency}`;
+  const formatted = new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: Math.min(2, digits),
+    maximumFractionDigits: digits,
+  }).format(amount);
+  return `${formatted} ${currency}`;
 }
 
 function formatNumber(value: number | null | undefined) {
@@ -3197,9 +3561,9 @@ function deepseekThinkingLabel(value: 'default' | 'enabled' | 'disabled', locale
       disabled: 'Disabled',
     },
     zh: {
-      default: 'Default',
-      enabled: 'Enabled',
-      disabled: 'Disabled',
+      default: '默认',
+      enabled: '启用',
+      disabled: '禁用（推荐）',
     },
   };
   return labels[locale][value];
@@ -3360,6 +3724,112 @@ function buildSetupRecommendations(
 
 function cleanLabel(value: string) {
   return value.replace(/_/g, ' ').replace(/\b\w/g, (item) => item.toUpperCase());
+}
+
+type ReportHeading = {
+  id: string;
+  depth: number;
+  text: string;
+  index: number;
+};
+
+const markdownComponents: Components = {
+  h1({ children }) {
+    return <h1 id={slugifyHeading(reactNodeText(children))}>{children}</h1>;
+  },
+  h2({ children }) {
+    return <h2 id={slugifyHeading(reactNodeText(children))}>{children}</h2>;
+  },
+  h3({ children }) {
+    return <h3 id={slugifyHeading(reactNodeText(children))}>{children}</h3>;
+  },
+  h4({ children }) {
+    return <h4 id={slugifyHeading(reactNodeText(children))}>{children}</h4>;
+  },
+};
+
+function reactNodeText(node: React.ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(reactNodeText).join('');
+  if (React.isValidElement<{ children?: React.ReactNode }>(node)) return reactNodeText(node.props.children);
+  return '';
+}
+
+function stripMarkdownInline(value: string) {
+  return value
+    .replace(/!\[[^\]]*]\([^)]*\)/g, '')
+    .replace(/\[([^\]]+)]\([^)]*\)/g, '$1')
+    .replace(/[`*_~]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function slugifyHeading(value: string) {
+  const slug = stripMarkdownInline(value)
+    .toLowerCase()
+    .replace(/[^\p{Letter}\p{Number}]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug || 'section';
+}
+
+function extractMarkdownHeadings(markdown: string): ReportHeading[] {
+  const headings: ReportHeading[] = [];
+  markdown.split('\n').forEach((line) => {
+    const match = line.match(/^(#{1,4})\s+(.+?)\s*#*\s*$/);
+    if (!match) return;
+    const text = stripMarkdownInline(match[2]);
+    if (!text) return;
+    headings.push({ id: slugifyHeading(text), depth: match[1].length, text, index: headings.length });
+  });
+  return headings;
+}
+
+function countTextMatches(text: string, query: string) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return 0;
+  const haystack = text.toLowerCase();
+  let count = 0;
+  let index = haystack.indexOf(needle);
+  while (index !== -1) {
+    count += 1;
+    index = haystack.indexOf(needle, index + needle.length);
+  }
+  return count;
+}
+
+function matchesHistoryFilters(item: ReportHistoryItem, filters: HistoryFilters) {
+  const ticker = filters.ticker.trim().toLowerCase();
+  const provider = filters.provider.trim().toLowerCase();
+  const query = filters.query.trim().toLowerCase();
+  if (ticker && !item.ticker.toLowerCase().includes(ticker)) return false;
+  if (filters.status && item.status !== filters.status) return false;
+  if (filters.date && item.analysisDate !== filters.date && !item.submittedAt.startsWith(filters.date) && !item.archivedAt.startsWith(filters.date)) return false;
+  if (provider && !item.provider.toLowerCase().includes(provider)) return false;
+  if (query) {
+    const text = [
+      item.ticker,
+      item.analysisDate,
+      item.provider,
+      item.decision ?? '',
+      item.status,
+      item.analysts.join(' '),
+      String(item.researchDepth),
+    ].join(' ').toLowerCase();
+    if (!text.includes(query)) return false;
+  }
+  return true;
+}
+
+function orderTypeLabel(value: OrderRecord['type'], labels: Record<string, string>) {
+  if (value === 'analysis') return labels.orderTypeAnalysis;
+  if (value === 'recharge') return labels.orderTypeRecharge;
+  return labels.orderTypeAdjustment;
+}
+
+function reportFileName(tickerOrRunId: string, section: string) {
+  const safeTicker = tickerOrRunId.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'report';
+  const safeSection = section.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'section';
+  return `tradingagents-${safeTicker}-${safeSection}.md`;
 }
 
 function researchDepthLabel(value: number, fallback: string, locale: Locale) {

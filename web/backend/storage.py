@@ -327,16 +327,29 @@ class WebStorage:
             if balance < required:
                 raise ValueError(f"Insufficient balance. Available {balance} {pricing.currency}, need {required} {pricing.currency}.")
 
-    def estimate_preauthorization(self, config: WebConfig, pricing: PricingConfig | None = None) -> Decimal:
+    def estimate_analysis_amount(self, config: WebConfig, pricing: PricingConfig | None = None) -> Decimal:
         pricing = pricing or self.load_pricing()
         usage = TokenUsage(
             inputTokens=pricing.estimated_input_tokens_by_depth.get(str(config.research_depth), 0),
             outputTokens=pricing.estimated_output_tokens_by_depth.get(str(config.research_depth), 0),
         )
-        estimated = calculate_analysis_cost(pricing, config, usage, estimate=True)
+        return _money(calculate_analysis_cost(pricing, config, usage, estimate=True))
+
+    def estimate_preauthorization(self, config: WebConfig, pricing: PricingConfig | None = None) -> Decimal:
+        pricing = pricing or self.load_pricing()
+        estimated = self.estimate_analysis_amount(config, pricing)
         return _money(max(estimated * pricing.preauth_multiplier, pricing.preauth_floor))
 
-    def settle_analysis_order(self, order_id: str | None, config: WebConfig, stats: dict[str, Any], status: str) -> RunBilling | None:
+    def settle_analysis_order(
+        self,
+        order_id: str | None,
+        config: WebConfig,
+        stats: dict[str, Any],
+        status: str,
+        *,
+        error_summary: str | None = None,
+        error_stage: str | None = None,
+    ) -> RunBilling | None:
         if not order_id:
             return None
         with self._lock:
@@ -368,6 +381,10 @@ class WebStorage:
             order.actual_amount = _money(actual)
             order.refunded_amount = refund
             order.overage_amount = overage
+            if status not in {"succeeded", "cancelled"}:
+                order.error_stage = (error_stage or "analysis")[:80]
+                order.error_summary = (error_summary or "Analysis failed.")[:600]
+                order.charged_on_failure = charged > 0
             order.balance_after = _decimal(user["balance"])
             order.usage = usage
             order.updated_at = datetime.now(timezone.utc)

@@ -678,6 +678,9 @@ class OrderRecord(APIModel):
     run_id: str | None = None
     external_order_id: str | None = None
     description: str | None = None
+    error_stage: str | None = None
+    error_summary: str | None = None
+    charged_on_failure: bool = False
     usage: TokenUsage = Field(default_factory=TokenUsage)
     pricing_snapshot: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
@@ -686,6 +689,29 @@ class OrderRecord(APIModel):
 
 class OrderListResponse(APIModel):
     orders: list[OrderRecord] = Field(default_factory=list)
+
+
+class AnalysisEstimateRequest(APIModel):
+    config: WebConfig
+    run_count: int = 1
+
+    @field_validator("run_count")
+    @classmethod
+    def validate_run_count(cls, value: int) -> int:
+        if value < 1 or value > 50:
+            raise ValueError("Run count must be between 1 and 50.")
+        return value
+
+
+class AnalysisEstimateResponse(APIModel):
+    currency: str
+    run_count: int
+    preauthorized_amount: Decimal
+    estimated_amount: Decimal
+    model_provider: str
+    quick_model: str
+    deep_model: str
+    max_parallel_runs: int
 
 
 class RechargeRequest(APIModel):
