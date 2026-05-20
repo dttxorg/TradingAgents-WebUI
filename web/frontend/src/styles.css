@@ -1245,6 +1245,17 @@ textarea {
   background: #10212a;
 }
 
+.agent.failed {
+  border-color: #7b2d38;
+  background: #211014;
+}
+
+.agent.skipped {
+  border-color: #4c5658;
+  background: #121719;
+  color: #aab5b7;
+}
+
 .metrics-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

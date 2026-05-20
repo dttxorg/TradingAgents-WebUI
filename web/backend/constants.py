@@ -446,6 +446,24 @@ LLM_ROUTE_TARGETS = [
         "apiKeyField": "TRADINGAGENTS_PORTFOLIO_MANAGER_LLM_API_KEY",
         "description": "Final decision depends on the completed risk debate.",
     },
+    {
+        "key": "buffett_reviewer",
+        "label": "Buffett Reference Reviewer",
+        "stage": "reference",
+        "defaultModelRole": "deep",
+        "parallelizable": True,
+        "apiKeyField": "TRADINGAGENTS_BUFFETT_REVIEWER_LLM_API_KEY",
+        "description": "Post-run advisory review using the full Buffett perspective skill.",
+    },
+    {
+        "key": "munger_reviewer",
+        "label": "Munger Reference Reviewer",
+        "stage": "reference",
+        "defaultModelRole": "deep",
+        "parallelizable": True,
+        "apiKeyField": "TRADINGAGENTS_MUNGER_REVIEWER_LLM_API_KEY",
+        "description": "Post-run advisory review using the full Munger perspective skill.",
+    },
 ]
 
 LLM_ROUTE_SECRET_FIELDS = [item["apiKeyField"] for item in LLM_ROUTE_TARGETS]

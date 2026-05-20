@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import queue
 import threading
@@ -32,11 +33,21 @@ from .constants import (
 )
 from .custom_data import configure_custom_data_interfaces
 from .llm_options import patched_tradingagents_llm_client_factory
-from .llm_routing import parallel_initial_analyst_workflow, has_enabled_llm_routes, routed_workflow
+from .llm_routing import LLMRouter, parallel_initial_analyst_workflow, has_enabled_llm_routes, routed_workflow
 from .markets import apply_market_profile, format_market_ticker, market_profile_prompt
-from .reference_reviewers import run_reference_reviews
+from .reference_reviewers import (
+    REVIEWER_AGENT_NAMES,
+    REVIEWER_OUTPUT_KEYS,
+    REVIEWER_ROUTE_KEYS,
+    is_review_unavailable,
+    run_reference_reviews,
+    unavailable_review,
+)
 from .schemas import BatchRunRequest, RunBilling, RunInfo, RunReports, RunRequest, UserPublic, WebConfig
 from .storage import WebStorage
+
+
+logger = logging.getLogger(__name__)
 
 
 def utc_now() -> datetime:
@@ -468,24 +479,20 @@ class RunManager:
             final_state = trace[-1]
             decision_text = final_state.get("final_trade_decision", "")
             run.decision = graph.process_signal(decision_text) if decision_text else None
-            reviewer_llm = getattr(graph, "deep_thinking_llm", None)
-            reference_reviews: dict[str, str] = {}
-            if reviewer_llm is not None:
-                message_buffer.update_agent_status("Buffett Reviewer", "in_progress")
-                message_buffer.update_agent_status("Munger Reviewer", "in_progress")
-                self._emit_progress(run, message_buffer, stats_handler, start)
-                reference_reviews = run_reference_reviews(
-                    reviewer_llm,
-                    final_state,
-                    run.config.output_language,
-                )
-                if reference_reviews.get("buffett_review"):
-                    message_buffer.update_report_section("buffett_review", reference_reviews["buffett_review"])
-                if reference_reviews.get("munger_review"):
-                    message_buffer.update_report_section("munger_review", reference_reviews["munger_review"])
-                message_buffer.update_agent_status("Buffett Reviewer", "completed")
-                message_buffer.update_agent_status("Munger Reviewer", "completed")
-                self._emit_progress(run, message_buffer, stats_handler, start)
+            if run.cancel_requested:
+                self._mark_cancelled(run)
+                return
+            reference_reviews = self._run_reference_reviewers(
+                run,
+                graph,
+                runtime_config,
+                secrets,
+                [stats_handler, event_handler],
+                message_buffer,
+                stats_handler,
+                start,
+                final_state,
+            )
             final_state = {**final_state, **reference_reviews}
 
             graph.curr_state = final_state
@@ -558,6 +565,78 @@ class RunManager:
                 "billing": run.billing.model_dump(mode="json", by_alias=True) if run.billing else None,
             },
         )
+
+    def _run_reference_reviewers(
+        self,
+        run: RunRecord,
+        graph: Any,
+        runtime_config: dict[str, Any],
+        secrets: dict[str, str],
+        callbacks: list[Any],
+        message_buffer: MessageBuffer,
+        stats_handler: StatsCallbackHandler,
+        start: float,
+        final_state: dict[str, Any],
+    ) -> dict[str, str]:
+        default_deep_llm = getattr(graph, "deep_thinking_llm", None)
+        router = LLMRouter(
+            runtime_config,
+            secrets,
+            callbacks,
+            getattr(graph, "quick_thinking_llm", None),
+            default_deep_llm,
+        )
+        route_payloads = runtime_config.get("llm_routes", {})
+        reviewer_llms: dict[str, Any] = {}
+        reference_reviews: dict[str, str] = {}
+
+        for reviewer_key, route_key in REVIEWER_ROUTE_KEYS.items():
+            agent = REVIEWER_AGENT_NAMES[reviewer_key]
+            output_key = REVIEWER_OUTPUT_KEYS[reviewer_key]
+            route_enabled = bool(route_payloads.get(route_key, {}).get("enabled"))
+            try:
+                if route_enabled:
+                    reviewer_llms[reviewer_key] = router.llm(route_key)
+                elif default_deep_llm is not None:
+                    reviewer_llms[reviewer_key] = default_deep_llm
+                else:
+                    reference_reviews[output_key] = unavailable_review("no deep thinking LLM is available")
+                    message_buffer.update_agent_status(agent, "skipped")
+            except Exception as exc:
+                logger.warning("%s route failed: %s", agent, exc)
+                reference_reviews[output_key] = unavailable_review("reviewer model route is not configured")
+                message_buffer.update_agent_status(agent, "failed")
+
+        for reviewer_key in reviewer_llms:
+            message_buffer.update_agent_status(REVIEWER_AGENT_NAMES[reviewer_key], "in_progress")
+        if reviewer_llms or reference_reviews:
+            self._emit_progress(run, message_buffer, stats_handler, start)
+
+        if reviewer_llms:
+            reference_reviews.update(
+                run_reference_reviews(
+                    reviewer_llms,
+                    final_state,
+                    run.config.output_language,
+                )
+            )
+
+        for reviewer_key in REVIEWER_ROUTE_KEYS:
+            agent = REVIEWER_AGENT_NAMES[reviewer_key]
+            output_key = REVIEWER_OUTPUT_KEYS[reviewer_key]
+            content = reference_reviews.get(output_key)
+            if content:
+                message_buffer.update_report_section(output_key, content)
+            if reviewer_key not in reviewer_llms:
+                continue
+            message_buffer.update_agent_status(
+                agent,
+                "failed" if is_review_unavailable(content) else "completed",
+            )
+
+        if reviewer_llms or reference_reviews:
+            self._emit_progress(run, message_buffer, stats_handler, start)
+        return reference_reviews
 
     def _settle_billing(self, run: RunRecord, status: str) -> None:
         if run.billing_settled:

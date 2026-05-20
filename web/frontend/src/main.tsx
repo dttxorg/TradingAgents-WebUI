@@ -150,8 +150,8 @@ const messages = {
     fetchingModels: 'Fetching',
     modelFetchUnavailable: 'Model discovery is not available for this provider.',
     fetchedModels: 'models loaded',
-    parallelRoutes: 'Parallel/API routing',
-    parallelRoutesHint: 'Initial analysts are the safest fan-out candidates. Debate, trader, and risk nodes keep order but can use separate API routes to avoid one provider bottleneck.',
+    parallelRoutes: 'Model/API routing',
+    parallelRoutesHint: 'Initial analysts and post-run reference reviewers can use independent model routes. Debate, trader, and risk nodes keep order but can use separate API routes to avoid one provider bottleneck.',
     routeEnabled: 'Enable route',
     routeModel: 'Route model',
     routeApiKey: 'Route API key',
@@ -279,6 +279,7 @@ const messages = {
     succeeded: 'succeeded',
     failed: 'failed',
     cancelled: 'cancelled',
+    skipped: 'skipped',
   },
   zh: {
     loading: '正在加载 TradingAgents 控制台',
@@ -347,8 +348,8 @@ const messages = {
     fetchingModels: '拉取中',
     modelFetchUnavailable: '该供应商暂不支持自动拉取模型。',
     fetchedModels: '个模型已加载',
-    parallelRoutes: '并行/API 路由',
-    parallelRoutesHint: '四个初始分析师最适合后续并行扇出；辩论、交易员和风控节点保持顺序，但可以分配独立 API 路由，避免单个供应商限流拖慢整体运行。',
+    parallelRoutes: '模型/API 路由',
+    parallelRoutesHint: '初始分析师和最终参考评审可以配置独立模型路由；辩论、交易员和风控节点保持顺序，但也可以分配独立 API 路由，避免单个供应商限流拖慢整体运行。',
     routeEnabled: '启用路由',
     routeModel: '路由模型',
     routeApiKey: '路由 API Key',
@@ -476,6 +477,7 @@ const messages = {
     succeeded: '已完成',
     failed: '失败',
     cancelled: '已停止',
+    skipped: '已跳过',
   },
 };
 
@@ -571,6 +573,8 @@ const agentLabels: Record<Locale, Record<string, string>> = {
     'Portfolio Manager': '组合经理',
     'Buffett Reviewer': '巴菲特参考评审',
     'Munger Reviewer': '芒格参考评审',
+    'Buffett Reference Reviewer': '巴菲特参考评审',
+    'Munger Reference Reviewer': '芒格参考评审',
   },
 };
 
@@ -2985,6 +2989,7 @@ function routeLabel(value: string, locale: Locale) {
 }
 
 function routeDescription(stage: string, parallelizable: boolean) {
+  if (stage === 'reference') return '该参考评审在组合经理决策之后运行，不改写主流程结论；可单独配置模型，用完整 skill 做收尾审视。';
   if (parallelizable) return '该初始分析节点与其他初始分析师没有强顺序依赖，适合后续并行扇出，也适合配置独立 API Key 分摊限流。';
   if (stage === 'research') return '该研究辩论节点依赖前文对话，保持顺序执行；独立 API 路由主要用于分摊限流。';
   if (stage === 'risk') return '该风控辩论节点依赖交易计划和前序风控意见，保持顺序执行；独立 API 路由主要用于分摊限流。';

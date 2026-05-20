@@ -52,6 +52,10 @@ def test_metadata_exposes_configurable_catalogs():
     assert "CUSTOM_DATA_API_KEY" in payload["secretFields"]
     assert "BACKTEST_DATA_API_KEY" in payload["secretFields"]
     assert "MOONSHOT_API_KEY" in payload["secretFields"]
+    assert any(route["key"] == "buffett_reviewer" for route in payload["llmRouteTargets"])
+    assert any(route["key"] == "munger_reviewer" for route in payload["llmRouteTargets"])
+    assert "TRADINGAGENTS_BUFFETT_REVIEWER_LLM_API_KEY" in payload["secretFields"]
+    assert "TRADINGAGENTS_MUNGER_REVIEWER_LLM_API_KEY" in payload["secretFields"]
 
 
 def test_backend_keeps_longbridge_as_frontend_only_data_preset():
@@ -700,8 +704,13 @@ def test_llm_routes_validate_and_persist_runtime_config(tmp_path):
                 "provider": "moonshot",
                 "backendUrl": "https://api.moonshot.cn/v1",
                 "modelId": "moonshot-v1-8k",
+            },
+            "buffett_reviewer": {
+                "enabled": True,
+                "provider": "openrouter",
+                "modelId": "anthropic/claude-sonnet-4",
             }
-        }
+        },
     )
 
     storage = WebStorage(tmp_path)
@@ -713,6 +722,8 @@ def test_llm_routes_validate_and_persist_runtime_config(tmp_path):
     assert runtime_config["llm_routes"]["market_analyst"]["enabled"] is True
     assert runtime_config["llm_routes"]["market_analyst"]["provider"] == "moonshot"
     assert runtime_config["llm_routes"]["market_analyst"]["modelId"] == "moonshot-v1-8k"
+    assert runtime_config["llm_routes"]["buffett_reviewer"]["enabled"] is True
+    assert runtime_config["llm_routes"]["buffett_reviewer"]["provider"] == "openrouter"
     assert runtime_config["max_parallel_runs"] == 3
     assert runtime_config["parallel_initial_analysts"] is True
     assert config.model_dump(mode="json", by_alias=True)["parallelInitialAnalysts"] is True
