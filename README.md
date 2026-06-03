@@ -225,6 +225,69 @@ gateway or provider-side proxy instead.
 
 This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
 
+## Upgrading
+
+This section is for operators pulling a new build that contains
+`fix: harden web ui against 40+ security, billing, and concurrency bugs`
+(commit `5362b8a` and later on `webui/main`).
+
+### Behavioural changes that may affect you
+
+1. **Multi-worker `uvicorn --workers N` now refuses to start.** The
+   in-process run manager and the storage layer's `RLock` only
+   synchronise within a single process, so the application raises a
+   `RuntimeError` at startup if `WEB_CONCURRENCY` or `UVICORN_WORKERS`
+   is greater than one. To opt back into the (unsupported) multi-worker
+   mode temporarily, set `TRADINGAGENTS_REFUSE_MULTI_WORKER=0`. The
+   correct scale-out path is a load balancer in front of multiple
+   single-worker instances once storage is migrated to a shared backend.
+2. **Custom data, backtest price, and model discovery base URLs are
+   vetted by an SSRF guard.** Loopback, link-local, and RFC1918 hosts
+   are refused by default. If you point a custom interface at an
+   internal reverse proxy, set `TRADINGAGENTS_ALLOW_PRIVATE_NETWORK_URLS=1`.
+   All three endpoints also disable redirect-following and cap the
+   outbound timeout at 30 seconds.
+3. **An enabled LLM route must declare an explicit `modelId`.** Empty
+   `modelId` with `enabled: true` is now a schema error so the route
+   does not silently fall back to the global `quickThinkLlm` /
+   `deepThinkLlm`. Existing configs that relied on the silent fallback
+   must be updated before `PUT /api/config` will accept them.
+4. **`/api/backtests/config` is admin-only.** Sub-accounts can no
+   longer read `customBaseUrl` or other internal-vendor settings. If a
+   sub-account frontend surfaces that endpoint, it will start receiving
+   `403`.
+5. **Login is rate-limited.** Five wrong passwords within five minutes
+   locks the username for fifteen minutes. Operators rolling out
+   forgotten-password flows should test the lockout path first.
+6. **`reviewWindowDays` for backtests is capped at 365** (was 3650).
+   Larger values in existing configs will need to be lowered before the
+   next save.
+7. **Failed runs no longer broadcast a Python traceback over SSE.**
+   The `errorClass` and `message` fields remain; the `traceback` field
+   is gone. Custom error UIs that rendered the stack should switch to
+   the new fields.
+8. **Cancelling a queued run releases the preauthorised balance
+   immediately**, and cancelling one ticket in a batch cancels the
+   remaining tickets in the chain. The user-visible behaviour is what
+   you'd expect; the change is mostly that frozen balances no longer
+   stick around.
+9. **Deactivating a user drops their existing sessions.** A user
+   marked `isActive: false` by an admin is logged out immediately. The
+   last active admin cannot demote or deactivate themselves — a 409
+   response is returned instead.
+10. **SSE reconnects honour `Last-Event-ID`.** Reconnecting clients
+    resume from the event they last saw, and the stream yields an
+    `id:` line on every event.
+
+### New environment variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `TRADINGAGENTS_ALLOW_PRIVATE_NETWORK_URLS` | unset (= deny) | Allow custom data / backtest price / model discovery base URLs that resolve to RFC1918 or link-local hosts. Loopback is still always refused. |
+| `TRADINGAGENTS_HTTPS` | unset | If set to `1`/`true`/`yes`, the session cookie is issued with `secure=True`. Set this when the app is served over HTTPS. |
+| `TRADINGAGENTS_SECURE_COOKIES` | unset | Overrides `TRADINGAGENTS_HTTPS`. Use `0` to force plain-HTTP development. |
+| `TRADINGAGENTS_REFUSE_MULTI_WORKER` | `1` | Set to `0` to allow `uvicorn --workers N` to start (unsupported). |
+
 ## 中文
 
 TradingAgents-WebUI 是一个面向
