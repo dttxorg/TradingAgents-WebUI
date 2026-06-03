@@ -96,6 +96,10 @@ class WebStorage:
         with self._lock:
             if self._load_users():
                 raise ValueError("Bootstrap is only available before the first user exists.")
+            # Re-check after acquiring the lock; ``users_exist()`` is a
+            # lock-free read used by ``/api/auth/bootstrap/status`` for
+            # cheap polling, so a TOCTOU race is possible between the
+            # status check and create_bootstrap_admin.
             request = AdminUserCreate(
                 username=username,
                 password=password,
@@ -130,7 +134,12 @@ class WebStorage:
             self._save_users(users)
             return self._public_user(users[user_id])
 
-    def update_user(self, user_id: str, update: AdminUserUpdate) -> UserPublic | None:
+    def update_user(
+        self,
+        user_id: str,
+        update: AdminUserUpdate,
+        actor_id: str | None = None,
+    ) -> UserPublic | None:
         with self._lock:
             users = self._load_users()
             user = users.get(user_id)
@@ -139,9 +148,42 @@ class WebStorage:
             if update.display_name is not None:
                 user["display_name"] = update.display_name.strip() or None
             if update.role is not None:
+                # Guard rail: refuse to demote or deactivate the last
+                # active admin. Without this, an admin could lock every
+                # other admin (and themselves) out of the system.
+                if update.role != "admin" or (update.is_active is False):
+                    if user.get("role") == "admin" and user.get("is_active", True):
+                        other_active_admins = [
+                            other for other_id, other in users.items()
+                            if other_id != user_id
+                            and other.get("role") == "admin"
+                            and other.get("is_active", True)
+                        ]
+                        if not other_active_admins:
+                            raise ValueError(
+                                "Refusing to demote or deactivate the last active admin."
+                            )
+                # Guard rail: an admin cannot change their own role.
+                if actor_id is not None and user_id == actor_id and update.role != user.get("role"):
+                    raise ValueError("Admins cannot change their own role.")
                 user["role"] = update.role
             if update.is_active is not None:
+                if update.is_active is False and user.get("role") == "admin" and user.get("is_active", True):
+                    other_active_admins = [
+                        other for other_id, other in users.items()
+                        if other_id != user_id
+                        and other.get("role") == "admin"
+                        and other.get("is_active", True)
+                    ]
+                    if not other_active_admins:
+                        raise ValueError(
+                            "Refusing to deactivate the last active admin."
+                        )
                 user["is_active"] = update.is_active
+                # When a user is deactivated, drop their existing sessions
+                # so the next request with the old cookie is rejected.
+                if update.is_active is False:
+                    self._purge_sessions_for(user_id)
             if update.password is not None:
                 salt = new_salt()
                 user["password_salt"] = salt
@@ -162,6 +204,13 @@ class WebStorage:
             return self._public_user(user) if user else None
 
     def authenticate_user(self, username: str, password: str) -> UserPublic | None:
+        from .auth import get_failed_login_tracker
+
+        tracker = get_failed_login_tracker()
+        if not tracker.allow(username.strip().lower()):
+            # Don't even try to compare the password hash so a timing
+            # side channel cannot tell the lockout from a wrong password.
+            return None
         with self._lock:
             for user in self._load_users().values():
                 if user["username"].lower() != username.strip().lower():
@@ -169,7 +218,10 @@ class WebStorage:
                 if not user.get("is_active", True):
                     return None
                 if verify_password(password, user["password_salt"], user["password_hash"]):
+                    tracker.record_success(username.strip().lower())
                     return self._public_user(user)
+                tracker.record_failure(username.strip().lower())
+                return None
         return None
 
     def create_session(self, user_id: str, ttl_hours: int = 24 * 14) -> str:
@@ -252,6 +304,16 @@ class WebStorage:
                 raise ValueError("User not found.")
             now = datetime.now(timezone.utc)
             amount = _money(request.amount)
+            # Idempotency: if the same external order id was already
+            # applied, return the previous order instead of charging
+            # the user twice. The previous order's balanceAfter is
+            # already the post-credit balance, so the second call
+            # naturally lands on a no-op.
+            orders = self._load_orders()
+            if request.external_order_id:
+                for existing in orders.values():
+                    if existing.get("externalOrderId") == request.external_order_id:
+                        return OrderRecord.model_validate(existing)
             balance = _decimal(user["balance"]) + amount
             user["balance"] = str(_money(balance))
             user["updated_at"] = now.isoformat()
@@ -364,7 +426,14 @@ class WebStorage:
             user = users.get(order.user_id)
             if user is None:
                 return self.order_billing_summary(order)
-            pricing = PricingConfig.model_validate(order.pricing_snapshot or {})
+            try:
+                pricing = PricingConfig.model_validate(order.pricing_snapshot or {})
+            except Exception:
+                # Older snapshots (pre-required-field) may not satisfy a
+                # newer schema. Fall back to the live pricing config so a
+                # single stuck order doesn't keep failing the same way
+                # forever.
+                pricing = self.load_pricing()
             usage = usage_from_stats(stats)
             actual = calculate_analysis_cost(pricing, config, usage, estimate=False)
             if status == "cancelled" and usage.input_tokens == 0 and usage.output_tokens == 0:
@@ -374,7 +443,14 @@ class WebStorage:
             overage = _money(max(actual - order.frozen_amount, Decimal("0")))
             frozen_balance = max(_decimal(user["frozen_balance"]) - order.frozen_amount, Decimal("0"))
             user["frozen_balance"] = str(_money(frozen_balance))
+            # Refund the unused frozen portion to the available balance.
             user["balance"] = str(_money(_decimal(user["balance"]) + refund))
+            # If the actual cost exceeded the preauth, charge the
+            # overage from the available balance. The previous
+            # implementation recorded the overage as a memo only and
+            # silently left the user under-billed.
+            if overage > 0:
+                user["balance"] = str(_money(_decimal(user["balance"]) - overage))
             user["updated_at"] = datetime.now(timezone.utc).isoformat()
             order.status = "settled" if status == "succeeded" else "cancelled" if status == "cancelled" else "failed_settled"
             order.amount = charged
@@ -532,6 +608,13 @@ class WebStorage:
             if _parse_datetime(session.get("expires_at")) > now
         }
 
+    def _purge_sessions_for(self, user_id: str) -> None:
+        """Drop every session belonging to ``user_id`` (e.g. on deactivation)."""
+        sessions = self._load_sessions()
+        kept = {key: session for key, session in sessions.items() if session.get("user_id") != user_id}
+        if len(kept) != len(sessions):
+            self._save_sessions(kept)
+
     def _load_orders(self) -> dict[str, dict[str, Any]]:
         payload = self._load_json(self.orders_path, {"orders": []})
         orders = payload.get("orders", []) if isinstance(payload, dict) else []
@@ -571,6 +654,52 @@ class WebStorage:
             if key in SECRET_FIELDS and isinstance(value, str) and value
         })
         return secrets
+
+    def reconcile_orphan_orders(self, max_age_seconds: int = 1800) -> int:
+        """Refund any order that is still ``preauthorized`` past the cutoff.
+
+        A preauthorized order whose corresponding ``RunRecord`` is gone (most
+        commonly because the backend was killed with ``SIGKILL`` between
+        preauth and settle) would otherwise freeze the user's balance
+        forever. This sweep, called once on startup, full-refunds any
+        preauthorized order whose ``createdAt`` is older than the cutoff.
+        """
+        now = datetime.now(timezone.utc)
+        cutoff = now.timestamp() - max_age_seconds
+        with self._lock:
+            orders = self._load_orders()
+            users = self._load_users()
+            changed = False
+            refunded_count = 0
+            for order_id, raw in orders.items():
+                if raw.get("status") != "preauthorized":
+                    continue
+                created_at = _parse_datetime(raw.get("createdAt"))
+                if created_at.timestamp() > cutoff:
+                    continue
+                user = users.get(raw.get("userId"))
+                frozen = _decimal(user["frozen_balance"]) if user else Decimal("0")
+                release = _money(min(_decimal(raw.get("frozenAmount", 0)), frozen))
+                if user and release > 0:
+                    user["frozen_balance"] = str(_money(frozen - release))
+                    user["balance"] = str(_money(_decimal(user["balance"]) + release))
+                    user["updated_at"] = now.isoformat()
+                raw["status"] = "failed_settled"
+                raw["refundedAmount"] = str(release)
+                raw["actualAmount"] = "0"
+                raw["errorStage"] = "reconcile_orphan"
+                raw["errorSummary"] = (
+                    "Preauthorized order was settled on next startup because the"
+                    " original run never completed."
+                )[:600]
+                raw["updatedAt"] = now.isoformat()
+                orders[order_id] = raw
+                changed = True
+                refunded_count += 1
+            if changed:
+                self._save_users(users)
+                self._save_orders(orders)
+            return refunded_count
 
     def save_secrets(self, updates: dict[str, str | None]) -> dict[str, SecretFieldStatus]:
         secrets = self.load_secrets()

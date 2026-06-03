@@ -6,6 +6,7 @@ import requests
 
 from .constants import model_options, provider_default_base_url, provider_model_fetch, provider_secret_field
 from .schemas import DiscoveredModel, ModelFetchRequest, ModelFetchResponse
+from .ssrf_guard import assert_safe_url, safe_request_kwargs
 
 
 def fetch_provider_models(request: ModelFetchRequest, secrets: dict[str, str]) -> ModelFetchResponse:
@@ -16,6 +17,10 @@ def fetch_provider_models(request: ModelFetchRequest, secrets: dict[str, str]) -
     base_url = request.base_url or provider_default_base_url(request.provider)
     if not base_url:
         raise ValueError("Base URL is required to fetch models for this provider.")
+    # Validate up front: the user-supplied base URL is the most likely SSRF
+    # vector in this code path. Refuse private/loopback/link-local hosts
+    # unless the deployment has explicitly opted in.
+    base_url = assert_safe_url(base_url, context=f"provider '{request.provider}' base URL")
 
     secret_field = provider_secret_field(request.provider)
     api_key = secrets.get(secret_field) if secret_field else None
@@ -40,7 +45,12 @@ def _fetch_openai_compatible_models(base_url: str, api_key: str | None) -> list[
     headers = {}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    response = requests.get(f"{base_url.rstrip('/')}/models", headers=headers, timeout=20)
+    url = f"{base_url.rstrip('/')}/models"
+    response = requests.get(
+        url,
+        headers=headers,
+        **safe_request_kwargs(url, context="openai-compatible model discovery"),
+    )
     response.raise_for_status()
     payload = response.json()
     raw_models = payload.get("data", payload.get("models", [])) if isinstance(payload, dict) else payload
@@ -49,7 +59,11 @@ def _fetch_openai_compatible_models(base_url: str, api_key: str | None) -> list[
 
 def _fetch_google_models(base_url: str, api_key: str | None) -> list[DiscoveredModel]:
     url = f"{base_url.rstrip('/')}/models" if base_url.rstrip("/").endswith("/v1beta") else f"{base_url.rstrip('/')}/v1beta/models"
-    response = requests.get(url, params={"key": api_key}, timeout=20)
+    response = requests.get(
+        url,
+        params={"key": api_key},
+        **safe_request_kwargs(url, context="Google model discovery"),
+    )
     response.raise_for_status()
     payload = response.json()
     raw_models = payload.get("models", []) if isinstance(payload, dict) else []
@@ -57,10 +71,11 @@ def _fetch_google_models(base_url: str, api_key: str | None) -> list[DiscoveredM
 
 
 def _fetch_anthropic_models(base_url: str, api_key: str | None) -> list[DiscoveredModel]:
+    url = f"{base_url.rstrip('/')}/v1/models"
     response = requests.get(
-        f"{base_url.rstrip('/')}/v1/models",
+        url,
         headers={"x-api-key": api_key or "", "anthropic-version": "2023-06-01"},
-        timeout=20,
+        **safe_request_kwargs(url, context="Anthropic model discovery"),
     )
     response.raise_for_status()
     payload = response.json()

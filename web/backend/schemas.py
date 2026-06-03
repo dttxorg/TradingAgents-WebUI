@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Literal
@@ -76,19 +77,39 @@ class CustomDataInterfaceConfig(APIModel):
         if value is None:
             return None
         cleaned = value.strip().rstrip("/")
-        return cleaned or None
+        if not cleaned:
+            return None
+        # Reject obviously unsafe schemes at config-write time. The
+        # runtime egress guard (ssrf_guard) is the authoritative check,
+        # but failing fast at the schema layer means a bad URL never gets
+        # persisted to config.json in the first place.
+        from .ssrf_guard import assert_safe_url
+
+        return assert_safe_url(cleaned, context="base URL")
 
     @field_validator("endpoints")
     @classmethod
     def validate_endpoints(cls, value: dict[str, str]) -> dict[str, str]:
         allowed = {item["method"] for item in CUSTOM_DATA_METHODS}
+        # Constrain endpoint paths to a conservative character set so a
+        # config typo (CRLF, backslash, etc.) cannot smuggle a malformed
+        # URL into a ``requests.post`` call.
+        path_re = re.compile(r"^/[A-Za-z0-9_./\-{}%]*$")
         endpoints = {}
         for method, path in value.items():
             if method not in allowed:
                 raise ValueError(f"Unsupported custom data method: {method}")
             cleaned = path.strip() if isinstance(path, str) else ""
             if cleaned:
-                endpoints[method] = cleaned if cleaned.startswith("/") else f"/{cleaned}"
+                # Normalise to a leading slash before validating so a
+                # bare ``ticker-news`` becomes ``/ticker-news`` and
+                # passes the regex below.
+                normalised = cleaned if cleaned.startswith("/") else f"/{cleaned}"
+                if not path_re.match(normalised):
+                    raise ValueError(
+                        f"Endpoint path for '{method}' contains invalid characters: {cleaned!r}"
+                    )
+                endpoints[method] = normalised
         return endpoints
 
 
@@ -125,6 +146,16 @@ class LLMRouteConfig(APIModel):
             return None
         cleaned = value.strip()
         return cleaned or None
+
+    @model_validator(mode="after")
+    def validate_enabled(self) -> "LLMRouteConfig":
+        # If the route is active, the operator must pick an explicit model;
+        # otherwise the router would silently fall back to the global
+        # ``quick_think_llm`` / ``deep_think_llm`` and the route would not
+        # actually do what the admin thought.
+        if self.enabled and not self.model_id:
+            raise ValueError("LLM route is enabled but model_id is empty.")
+        return self
 
 
 class MarketProfileConfig(APIModel):
@@ -765,8 +796,8 @@ class BacktestScheduleConfig(APIModel):
     @field_validator("review_window_days")
     @classmethod
     def validate_window(cls, value: int) -> int:
-        if value < 1 or value > 3650:
-            raise ValueError("Review window must be between 1 and 3650 days.")
+        if value < 1 or value > 365:
+            raise ValueError("Review window must be between 1 and 365 days.")
         return value
 
     @field_validator("max_reports_per_cycle")
@@ -929,7 +960,15 @@ class ModelFetchRequest(APIModel):
         if value is None:
             return None
         cleaned = value.strip().rstrip("/")
-        return cleaned or None
+        if not cleaned:
+            return None
+        # Reject obviously unsafe schemes at config-write time. The
+        # runtime egress guard (ssrf_guard) is the authoritative check,
+        # but failing fast at the schema layer means a bad URL never gets
+        # persisted to config.json in the first place.
+        from .ssrf_guard import assert_safe_url
+
+        return assert_safe_url(cleaned, context="base URL")
 
 
 class DiscoveredModel(APIModel):

@@ -18,6 +18,7 @@ from .schemas import (
     HistoricalReport,
     UserPublic,
 )
+from .ssrf_guard import assert_safe_url, safe_request_kwargs
 
 if TYPE_CHECKING:
     from .storage import WebStorage
@@ -140,6 +141,18 @@ class BacktestScheduler:
     def start(self) -> None:
         if self._thread is not None:
             return
+        # A previous process was killed mid-cycle and left the scheduler
+        # state stuck on "running". Reset it so the next loop iteration
+        # knows nothing is in flight and we don't sit on a half-finished
+        # batch forever.
+        try:
+            state = self.storage.load_backtest_scheduler_state()
+            if state.get("status") == "running":
+                self.storage.save_backtest_scheduler_state(
+                    {"lastRunAt": utc_now().isoformat(), "status": "interrupted"}
+                )
+        except Exception:
+            pass
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
@@ -351,7 +364,13 @@ def fetch_custom_price_bars(
         return []
     import requests
 
-    url = f"{config.custom_base_url}{config.custom_endpoint}"
+    # Validate the configured base URL before sending any data. The API key
+    # is bundled with the request, so refusing to dispatch to private/loopback
+    # hosts is critical: a misconfigured base URL must not become an
+    # accidental exfiltration channel for the admin's data credentials.
+    base_url = assert_safe_url(config.custom_base_url, context="backtest custom price API")
+    endpoint = config.custom_endpoint if config.custom_endpoint.startswith("/") else f"/{config.custom_endpoint}"
+    url = f"{base_url}{endpoint}"
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -365,10 +384,23 @@ def fetch_custom_price_bars(
             "interval": "1d",
             "purpose": "backtest_observation",
         },
-        timeout=30,
+        **safe_request_kwargs(url, context="backtest custom price API"),
     )
-    response.raise_for_status()
-    payload = response.json()
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        # Don't echo the URL (which we already vetted) or any header
+        # echo back; the request library's default exception includes
+        # the URL and can leak the path. Wrap with a stable message.
+        raise RuntimeError(
+            f"Custom price API returned status {response.status_code} for {ticker}."
+        ) from exc
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Custom price API returned a non-JSON response for {ticker}."
+        ) from exc
     rows = _custom_rows(payload)
     return [bar for row in rows if (bar := _custom_bar(row)) is not None]
 

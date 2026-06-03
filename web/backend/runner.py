@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import itertools
 import json
 import logging
 import os
 import queue
+import re
 import threading
 import time
 import traceback
@@ -167,6 +169,50 @@ class WebEventCallbackHandler(BaseCallbackHandler):
         self.run.emit("tool", {"phase": "start", "name": name, "input": input_str[:400]})
 
 
+# Maximum payload size (in characters) for the noisy event types that
+# otherwise echo large LLM messages or tool arguments. The full content
+# still ends up in the run's report history; the SSE stream is for live
+# progress only.
+_MAX_LIVE_PAYLOAD_CHARS = 4000
+_SENSITIVE_KEY_PATTERNS = (
+    re.compile(r"sk-[A-Za-z0-9_\-]{16,}"),
+    re.compile(r"AIza[0-9A-Za-z_\-]{16,}"),
+    re.compile(r"Bearer\s+[A-Za-z0-9_\-]{8,}"),
+    re.compile(r"(?i)(api[_-]?key|token|password|secret)\s*[:=]\s*['\"]?([^\s,'\"}]{6,})"),
+)
+
+
+def _redact(value: str) -> str:
+    if not value:
+        return value
+    out = value
+    for pattern in _SENSITIVE_KEY_PATTERNS:
+        out = pattern.sub("[REDACTED]", out)
+    return out
+
+
+def _scrub_payload(payload: dict[str, Any], event_type: str) -> dict[str, Any]:
+    """Limit payload size and scrub obvious secrets before SSE broadcast.
+
+    The full unredacted content is preserved in ``run.reports`` /
+    ``save_report_history``; this only protects the live event stream
+    from accidentally leaking API keys pasted into system prompts.
+    """
+    if event_type in {"message", "tool", "llm", "configuration"}:
+        # Truncate long string fields to keep one event from being a
+        # multi-megabyte SSE chunk.
+        scrubbed: dict[str, Any] = {}
+        for key, value in payload.items():
+            if isinstance(value, str) and len(value) > _MAX_LIVE_PAYLOAD_CHARS:
+                scrubbed[key] = _redact(value[:_MAX_LIVE_PAYLOAD_CHARS]) + "...[truncated]"
+            elif isinstance(value, str):
+                scrubbed[key] = _redact(value)
+            else:
+                scrubbed[key] = value
+        return scrubbed
+    return payload
+
+
 @dataclass
 class RunRecord:
     id: str
@@ -188,18 +234,37 @@ class RunRecord:
     cancel_requested: bool = False
     next_run_id: str | None = None
     events: list[dict[str, Any]] = field(default_factory=list)
-    event_queue: "queue.Queue[dict[str, Any]]" = field(default_factory=queue.Queue)
+    event_queue: "queue.Queue[dict[str, Any]]" = field(default_factory=lambda: queue.Queue(maxsize=10000))
     billing_settled: bool = False
+    # Serialises emit() so the events list and event_queue stay consistent
+    # even when the worker thread and the HTTP cancel handler race.
+    _emit_lock: threading.Lock = field(default_factory=threading.Lock)
+    _event_counter: "itertools.count[int]" = field(default_factory=lambda: itertools.count(1))
 
     def emit(self, event_type: str, payload: dict[str, Any]) -> None:
-        event = {
-            "id": len(self.events) + 1,
-            "type": event_type,
-            "timestamp": utc_now().isoformat(),
-            "payload": payload,
-        }
-        self.events.append(event)
-        self.event_queue.put(event)
+        with self._emit_lock:
+            event = {
+                "id": next(self._event_counter),
+                "type": event_type,
+                "timestamp": utc_now().isoformat(),
+                "payload": _scrub_payload(payload, event_type),
+            }
+            self.events.append(event)
+            try:
+                self.event_queue.put_nowait(event)
+            except queue.Full:
+                # Drop the oldest queued event so a slow SSE consumer
+                # cannot blow up memory. The events list is the durable
+                # source of truth; reconnecting clients will still get
+                # every event from the list.
+                try:
+                    self.event_queue.get_nowait()
+                except queue.Empty:
+                    pass
+                try:
+                    self.event_queue.put_nowait(event)
+                except queue.Full:
+                    pass
 
     def info(self) -> RunInfo:
         return RunInfo(
@@ -278,14 +343,25 @@ class RunManager:
         if user is not None:
             config = request.config or self.storage.load_config()
             self.storage.ensure_batch_balance(user.id, config, len(request.tickers))
-        for index, ticker in enumerate(request.tickers):
-            runs.append(
-                self._create_run(
-                    RunRequest(ticker=ticker, analysis_date=request.analysis_date, config=request.config),
-                    user=user,
-                    enqueue=index == 0,
+        try:
+            for index, ticker in enumerate(request.tickers):
+                runs.append(
+                    self._create_run(
+                        RunRequest(ticker=ticker, analysis_date=request.analysis_date, config=request.config),
+                        user=user,
+                        enqueue=index == 0,
+                    )
                 )
-            )
+        except Exception:
+            # If a later ticket's preauth raises (typically "Insufficient
+            # balance"), refund the earlier tickets that already preauthed
+            # so the user doesn't lose money to a half-failed batch.
+            for run in runs:
+                try:
+                    self.cancel_run(run.id)
+                except Exception:
+                    pass
+            raise
         for current, next_run in zip(runs, runs[1:]):
             current.next_run_id = next_run.id
         return runs
@@ -304,6 +380,11 @@ class RunManager:
         if run.status == "queued":
             run.status = "cancelled"
             run.ended_at = utc_now()
+            # Queued runs already had preauthorize_analysis called in _create_run
+            # but were never picked up by a worker, so the finally block in
+            # _execute never runs and frozen_balance would otherwise stay
+            # stuck forever.
+            self._settle_billing(run, "cancelled")
             run.emit(
                 "status",
                 {
@@ -312,7 +393,16 @@ class RunManager:
                     "billing": run.billing.model_dump(mode="json", by_alias=True) if run.billing else None,
                 },
             )
+            # Propagate the cancellation to every sibling in a batch chain so
+            # the user doesn't have to cancel them one by one and so we don't
+            # enqueue them once the worker's finally block runs.
+            self._cancel_remaining_batch(run)
             return run
+        # Already running: just signal the worker. _execute will see the flag,
+        # call _mark_cancelled, and the finally block will skip _enqueue_next_run
+        # because we cleared the chain here.
+        if run.next_run_id:
+            self._cancel_remaining_batch(run)
         run.emit(
             "status",
             {
@@ -321,6 +411,38 @@ class RunManager:
             },
         )
         return run
+
+    def _cancel_remaining_batch(self, run: RunRecord) -> None:
+        """Cancel every sibling still queued behind ``run`` in a batch chain.
+
+        Walks the ``next_run_id`` linked list and marks each follow-up run as
+        cancelled, releasing its preauthorized balance. The worker's finally
+        block in ``_execute`` no longer needs to call ``_enqueue_next_run``
+        for this chain because the chain is severed here.
+        """
+        next_run_id = run.next_run_id
+        run.next_run_id = None
+        while next_run_id:
+            sibling = self.get_run(next_run_id)
+            next_run_id = sibling.next_run_id if sibling else None
+            if sibling is None:
+                continue
+            sibling.next_run_id = None
+            if sibling.status in {"succeeded", "failed", "cancelled"}:
+                continue
+            sibling.cancel_requested = True
+            if sibling.status == "queued":
+                sibling.status = "cancelled"
+                sibling.ended_at = utc_now()
+                self._settle_billing(sibling, "cancelled")
+                sibling.emit(
+                    "status",
+                    {
+                        "status": "cancelled",
+                        "message": localized_event_message(sibling.config.output_language, "analysis_cancelled"),
+                        "billing": sibling.billing.model_dump(mode="json", by_alias=True) if sibling.billing else None,
+                    },
+                )
 
     def list_runs(self, active_only: bool = False, limit: int = 100, user_id: str | None = None) -> list[RunRecord]:
         limit = max(1, min(limit, 200))
@@ -424,6 +546,18 @@ class RunManager:
             if runtime_config.get("checkpoint_enabled"):
                 checkpointer_ctx = get_checkpointer(runtime_config["data_cache_dir"], run.request.ticker)
                 saver = checkpointer_ctx.__enter__()
+                # Always start from a clean checkpoint state for this run. The
+                # thread_id is derived from ticker+date, so two users retrying
+                # the same ticker+date would otherwise inherit the previous
+                # attempt's intermediate state.
+                try:
+                    clear_checkpoint(
+                        runtime_config["data_cache_dir"],
+                        run.request.ticker,
+                        str(run.request.analysis_date),
+                    )
+                except Exception:
+                    pass
                 graph.graph = graph.workflow.compile(checkpointer=saver)
                 args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = thread_id(
                     run.request.ticker,
@@ -534,12 +668,19 @@ class RunManager:
             run.error = str(exc)
             run.ended_at = utc_now()
             self._settle_billing(run, "failed")
+            # Do NOT broadcast the full traceback. Stack frames can
+            # include environment values, library versions, and absolute
+            # file paths that we don't want a sub-account (or anyone
+            # sharing a session) to see. The full traceback is preserved
+            # in the backend log via the standard ``logger`` and on the
+            # run record for admin debugging via a dedicated endpoint.
+            logger.exception("run %s failed", run.id)
             run.emit(
                 "status",
                 {
                     "status": "failed",
                     "message": str(exc),
-                    "traceback": traceback.format_exc(),
+                    "errorClass": type(exc).__name__,
                     "billing": run.billing.model_dump(mode="json", by_alias=True) if run.billing else None,
                 },
             )

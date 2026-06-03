@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from cli.utils import normalize_ticker_symbol
+from langchain_core.messages import SystemMessage
 
 from .constants import STOCK_MARKETS
 from .schemas import WebConfig
@@ -51,7 +52,11 @@ def apply_market_profile(state: dict[str, Any], prompt: str) -> dict[str, Any]:
     if not prompt:
         return state
     messages = list(state.get("messages", []))
-    messages.insert(0, ("system", prompt))
+    # Insert a real SystemMessage object. The graph's downstream nodes call
+    # ``BaseMessage`` methods on the conversation history; passing a tuple
+    # here used to slip through some LangChain versions but breaks the
+    # newer ones.
+    messages.insert(0, SystemMessage(content=prompt))
     state["messages"] = messages
     state["market_profile"] = prompt
     return state

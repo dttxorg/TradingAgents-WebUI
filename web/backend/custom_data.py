@@ -6,6 +6,7 @@ from typing import Any, Callable
 import requests
 
 from .constants import CUSTOM_DATA_METHODS, CUSTOM_DATA_VENDOR
+from .ssrf_guard import assert_safe_url, safe_request_kwargs
 
 
 DEFAULT_ENDPOINTS = {item["method"]: item["defaultPath"] for item in CUSTOM_DATA_METHODS}
@@ -36,9 +37,17 @@ def _custom_method(method: str, config: dict[str, Any], api_key: str | None) -> 
         if not base_url:
             raise RuntimeError(f"Custom data interface for '{category}' requires a base URL.")
 
+        # Validate the base URL up front so we never make an outbound request
+        # to a private network, link-local, or otherwise blocked host.
+        base_url = assert_safe_url(base_url, context=f"custom data interface '{category}'")
+
         endpoint_map = settings.get("endpoints", {})
         path = endpoint_map.get(method) or DEFAULT_ENDPOINTS[method]
-        url = f"{base_url}{path if path.startswith('/') else f'/{path}'}"
+        # ``path`` is already constrained to start with "/" by the schema
+        # validator; we re-check defensively in case it ever bypasses the API.
+        if not path.startswith("/"):
+            path = f"/{path}"
+        url = f"{base_url}{path}"
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
@@ -47,7 +56,7 @@ def _custom_method(method: str, config: dict[str, Any], api_key: str | None) -> 
             url,
             headers=headers,
             json={"method": method, "args": list(args), "kwargs": kwargs},
-            timeout=30,
+            **safe_request_kwargs(url, context=f"custom data interface '{category}'"),
         )
         response.raise_for_status()
 

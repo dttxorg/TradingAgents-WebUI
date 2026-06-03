@@ -6,7 +6,7 @@ import queue
 import os
 import shutil
 from pathlib import Path
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from dotenv import load_dotenv
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Request, Response
@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from requests import RequestException
 
-from .auth import SESSION_COOKIE
+from .auth import SESSION_COOKIE, get_failed_login_tracker
 from .backtesting import BacktestEngine, BacktestScheduler
 from .constants import metadata_payload
 from .model_discovery import fetch_provider_models
@@ -51,6 +51,36 @@ load_dotenv(".env.enterprise", override=False)
 
 storage = WebStorage()
 storage.load_secrets_into_env()
+# Refund any analysis order that was preauthorized but never settled
+# (e.g. the previous process died between preauth and billing settle).
+# This must run before RunManager starts so the storage layer's view of
+# frozen balances matches reality.
+try:
+    storage.reconcile_orphan_orders()
+except Exception:
+    pass
+
+# Refuse to start under a multi-worker process manager. The RunManager
+# stores in-memory state (run queue, worker threads, event queues) and the
+# storage layer's RLock only synchronises within a single process. Running
+# more than one worker would silently lose runs, double-bill users, and
+# leak preauthorized balances. Operators wanting horizontal scale must
+# run multiple single-worker instances behind a shared front-end (e.g.
+# a load balancer with sticky sessions) and migrate storage to a real
+# database first.
+if os.getenv("TRADINGAGENTS_REFUSE_MULTI_WORKER", "1") not in {"0", "false", "no"}:
+    worker_count_env = os.getenv("WEB_CONCURRENCY") or os.getenv("UVICORN_WORKERS") or ""
+    try:
+        worker_count = int(worker_count_env) if worker_count_env else 1
+    except ValueError:
+        worker_count = 1
+    if worker_count > 1:
+        raise RuntimeError(
+            "Refusing to start: TRADINGAGENTS does not support multi-worker"
+            " deployments. Run a single uvicorn worker and replicate at the"
+            " load-balancer layer once storage is migrated to a shared backend."
+        )
+
 run_manager = RunManager(storage)
 backtest_scheduler = BacktestScheduler(storage)
 
@@ -61,7 +91,18 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
-backtest_scheduler.start()
+
+
+@app.on_event("startup")
+def _on_startup() -> None:
+    # Start the backtest scheduler as part of FastAPI's startup hook so
+    # that tests importing this module do not eagerly spawn threads.
+    backtest_scheduler.start()
+
+
+@app.on_event("shutdown")
+def _on_shutdown() -> None:
+    backtest_scheduler.stop()
 
 
 SECURITY_HEADERS = {
@@ -93,8 +134,21 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 
-def _cookie_secure() -> bool:
-    return os.getenv("TRADINGAGENTS_SECURE_COOKIES", "0").lower() in {"1", "true", "yes"}
+def _cookie_secure_default() -> bool:
+    """Cookie ``secure`` flag should follow the request scheme in production.
+
+    Operators can still force-disable via ``TRADINGAGENTS_SECURE_COOKIES=0``
+    for local plain-HTTP development. The default used to be ``False``,
+    which silently downgraded cookies to plain HTTP when an HTTPS reverse
+    proxy was misconfigured.
+    """
+    override = os.getenv("TRADINGAGENTS_SECURE_COOKIES")
+    if override is not None:
+        return override.lower() in {"1", "true", "yes"}
+    return os.getenv("TRADINGAGENTS_HTTPS", "0").lower() in {"1", "true", "yes"}
+
+
+_COOKIE_SECURE = _cookie_secure_default()
 
 
 def set_session_cookie(response: Response, token: str) -> None:
@@ -102,7 +156,7 @@ def set_session_cookie(response: Response, token: str) -> None:
         SESSION_COOKIE,
         token,
         httponly=True,
-        secure=_cookie_secure(),
+        secure=_COOKIE_SECURE,
         samesite="lax",
         max_age=60 * 60 * 24 * 14,
         path="/",
@@ -110,7 +164,7 @@ def set_session_cookie(response: Response, token: str) -> None:
 
 
 def clear_session_cookie(response: Response) -> None:
-    response.delete_cookie(SESSION_COOKIE, path="/", samesite="lax")
+    response.delete_cookie(SESSION_COOKIE, path="/", samesite="lax", secure=_COOKIE_SECURE)
 
 
 def current_user(session_token: str | None = Cookie(default=None, alias=SESSION_COOKIE)) -> UserPublic:
@@ -144,39 +198,61 @@ def visible_config(config: WebConfig, user: UserPublic) -> WebConfig:
 
 
 def user_run_config(request: RunRequest, user: UserPublic) -> RunRequest:
-    if user.role == "admin" or request.config is None:
+    if user.role == "admin":
         return request
-    defaults = storage.load_config()
-    allowed = {
+    # Sub-accounts must never receive admin-only fields (backend_url, custom_data
+    # base URLs, internal LLM route endpoints, etc.). Strip them via
+    # visible_config so the runner cannot leak them into runtime_config.
+    defaults = visible_config(storage.load_config(), user)
+    # Caller-supplied config is ignored for sub-accounts: we always start from
+    # the (sanitized) admin defaults and overlay only the fields sub-accounts
+    # are allowed to influence.
+    user_fields: dict[str, Any] = {
         "ticker": request.ticker,
         "analysis_date": request.analysis_date,
-        "stock_market": request.config.stock_market,
-        "analysts": request.config.analysts,
-        "research_depth": request.config.research_depth,
     }
+    if request.config is not None:
+        user_fields["stock_market"] = request.config.stock_market
+        user_fields["analysts"] = request.config.analysts
+        user_fields["research_depth"] = request.config.research_depth
+        user_fields["output_language"] = request.config.output_language
+        # Sub-accounts may switch between providers, but only to ones already
+        # configured for the admin (avoid letting users route to a different
+        # endpoint than the admin set up).
+        if (
+            request.config.llm_provider
+            and request.config.llm_provider in defaults.llm_provider
+        ):
+            user_fields["llm_provider"] = request.config.llm_provider
     return RunRequest(
         ticker=request.ticker,
         analysisDate=request.analysis_date,
-        config=defaults.model_copy(update=allowed),
+        config=defaults.model_copy(update=user_fields),
     )
 
 
 def user_batch_config(request: BatchRunRequest, user: UserPublic) -> BatchRunRequest:
-    if user.role == "admin" or request.config is None:
+    if user.role == "admin":
         return request
-    defaults = storage.load_config()
+    defaults = visible_config(storage.load_config(), user)
+    user_fields: dict[str, Any] = {
+        "ticker": request.tickers[0],
+        "analysis_date": request.analysis_date,
+    }
+    if request.config is not None:
+        user_fields["stock_market"] = request.config.stock_market
+        user_fields["analysts"] = request.config.analysts
+        user_fields["research_depth"] = request.config.research_depth
+        user_fields["output_language"] = request.config.output_language
+        if (
+            request.config.llm_provider
+            and request.config.llm_provider in defaults.llm_provider
+        ):
+            user_fields["llm_provider"] = request.config.llm_provider
     return BatchRunRequest(
         tickers=request.tickers,
         analysisDate=request.analysis_date,
-        config=defaults.model_copy(
-            update={
-                "ticker": request.tickers[0],
-                "analysis_date": request.analysis_date,
-                "stock_market": request.config.stock_market,
-                "analysts": request.config.analysts,
-                "research_depth": request.config.research_depth,
-            }
-        ),
+        config=defaults.model_copy(update=user_fields),
     )
 
 
@@ -247,6 +323,12 @@ def bootstrap_admin(request: BootstrapRequest, response: Response) -> dict:
 
 @app.post("/api/auth/login")
 def login(request: LoginRequest, response: Response) -> dict:
+    username_key = request.username.strip().lower()
+    if not get_failed_login_tracker().allow(username_key):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed login attempts. Try again later.",
+        )
     user = storage.authenticate_user(request.username, request.password)
     if user is None:
         raise HTTPException(status_code=401, detail="Invalid username or password.")
@@ -291,8 +373,15 @@ def admin_create_user(request: AdminUserCreate, _: UserPublic = Depends(admin_us
 
 
 @app.patch("/api/admin/users/{user_id}")
-def admin_update_user(user_id: str, request: AdminUserUpdate, _: UserPublic = Depends(admin_user)) -> dict:
-    user = storage.update_user(user_id, request)
+def admin_update_user(
+    user_id: str,
+    request: AdminUserUpdate,
+    actor: UserPublic = Depends(admin_user),
+) -> dict:
+    try:
+        user = storage.update_user(user_id, request, actor_id=actor.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     if user is None:
         raise HTTPException(status_code=404, detail="User not found.")
     return user.model_dump(mode="json", by_alias=True)
@@ -459,7 +548,7 @@ def get_report_history(run_id: str, user: UserPublic = Depends(current_user)) ->
 
 
 @app.get("/api/backtests/config")
-def get_backtest_config(_: UserPublic = Depends(current_user)) -> dict:
+def get_backtest_config(_: UserPublic = Depends(admin_user)) -> dict:
     return storage.load_backtest_config().model_dump(mode="json", by_alias=True)
 
 
@@ -536,33 +625,70 @@ def get_backtest_ticker_summary(ticker: str, user: UserPublic = Depends(current_
 
 
 @app.get("/api/runs/{run_id}/events")
-async def get_run_events(run_id: str, user: UserPublic = Depends(current_user)) -> StreamingResponse:
+async def get_run_events(
+    run_id: str,
+    request: Request,
+    user: UserPublic = Depends(current_user),
+) -> StreamingResponse:
     run = run_manager.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found.")
     if user.role != "admin" and run.user_id != user.id:
         raise HTTPException(status_code=403, detail="Run does not belong to this user.")
 
+    # Honor Last-Event-ID so a reconnecting client can resume from where
+    # it left off. The browser sends this header automatically when
+    # EventSource is told to do so.
+    cursor = 0
+    last_event_id = request.headers.get("Last-Event-ID")
+    if last_event_id:
+        try:
+            cursor = max(0, int(last_event_id))
+        except ValueError:
+            cursor = 0
+
     async def stream() -> AsyncIterator[str]:
-        cursor = 0
+        nonlocal cursor
+        terminal = {"succeeded", "failed", "cancelled"}
         while True:
-            while cursor < len(run.events):
-                event = run.events[cursor]
-                cursor += 1
-                yield f"event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
-            if run.status in {"succeeded", "failed", "cancelled"}:
-                break
+            # Drain the events list under the run's emit lock so we never
+            # race the worker thread mid-append.
+            with run._emit_lock:
+                while cursor < len(run.events):
+                    event = run.events[cursor]
+                    cursor = event["id"] + 1 if "id" in event else cursor + 1
+                    yield (
+                        f"id: {event['id']}\n"
+                        f"event: {event['type']}\n"
+                        f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    )
+            if run.status in terminal:
+                return
+            if await request.is_disconnected():
+                return
             try:
                 event = await asyncio.to_thread(run.event_queue.get, True, 2)
             except queue.Empty:
+                # Heartbeat. If the client vanished between the last
+                # yield and now, bail out instead of looping forever.
+                if await request.is_disconnected():
+                    return
                 yield ": heartbeat\n\n"
                 continue
-            if event["id"] <= cursor:
+            if event["id"] < cursor:
                 continue
-            cursor = event["id"]
-            yield f"event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+            cursor = event["id"] + 1
+            yield (
+                f"id: {event['id']}\n"
+                f"event: {event['type']}\n"
+                f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            )
 
-    return StreamingResponse(stream(), media_type="text/event-stream")
+    response = StreamingResponse(stream(), media_type="text/event-stream")
+    # Disable buffering in case there's a reverse proxy (nginx) in front.
+    response.headers["Cache-Control"] = "no-cache"
+    response.headers["X-Accel-Buffering"] = "no"
+    return response
 
 
 frontend_dist = Path(__file__).resolve().parents[1] / "frontend" / "dist"

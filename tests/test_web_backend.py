@@ -254,7 +254,7 @@ def test_auth_bootstrap_login_and_role_permissions(monkeypatch, tmp_path):
     assert login.status_code == 200
     storage.save_config(WebConfig(
         backendUrl="http://10.0.0.1:9999/v1",
-        llmRoutes={"market_analyst": {"enabled": True, "backendUrl": "http://10.0.0.2:9999/v1"}},
+        llmRoutes={"market_analyst": {"enabled": True, "modelId": "gpt-4o", "backendUrl": "http://10.0.0.2:9999/v1"}},
         customDataInterfaces={"news_data": {"baseUrl": "http://10.0.0.3:9999/api", "endpoints": {"get_news": "/news"}}},
     ))
     user_config = client.get("/api/config")
@@ -517,8 +517,8 @@ def test_backtest_custom_price_api_is_dedicated_and_checkpointed(monkeypatch, tm
                 ]
             }
 
-    def fake_post(url, headers, json, timeout):
-        calls.append({"url": url, "headers": headers, "json": json, "timeout": timeout})
+    def fake_post(url, headers, json, timeout, allow_redirects=False, **kwargs):
+        calls.append({"url": url, "headers": headers, "json": json, "timeout": timeout, "allow_redirects": allow_redirects})
         return FakeResponse()
 
     monkeypatch.setattr(requests, "post", fake_post)
@@ -542,6 +542,7 @@ def test_backtest_custom_price_api_is_dedicated_and_checkpointed(monkeypatch, tm
                 "purpose": "backtest_observation",
             },
             "timeout": 30,
+            "allow_redirects": False,
         }
     ]
 
@@ -586,6 +587,12 @@ def test_deepseek_thinking_mode_defaults_persists_and_runtime_config(tmp_path):
 def test_deepseek_thinking_kwargs_are_only_added_for_deepseek_targets():
     from tradingagents.llm_clients import openai_client
 
+    # Snapshot the upstream passthrough list so we can assert we didn't
+    # touch it. The previous implementation mutated the module-level
+    # _PASSTHROUGH_KWARGS for every deepseek run, which leaked the
+    # ``extra_body`` argument into other OpenAI-compatible adapters.
+    passthrough_before = tuple(getattr(openai_client, "_PASSTHROUGH_KWARGS", ()))
+
     config = {"deepseek_thinking_mode": "disabled"}
 
     patched = apply_deepseek_thinking_kwargs(
@@ -597,7 +604,11 @@ def test_deepseek_thinking_kwargs_are_only_added_for_deepseek_targets():
     )
     assert patched["extra_body"] == {"thinking": {"type": "disabled"}}
     assert patched["timeout"] == 30
-    assert "extra_body" in openai_client._PASSTHROUGH_KWARGS
+    # The module-level passthrough list must NOT have been mutated as a
+    # side effect. Otherwise non-deepseek runs (below) would also start
+    # receiving ``extra_body``.
+    passthrough_after = tuple(getattr(openai_client, "_PASSTHROUGH_KWARGS", ()))
+    assert passthrough_after == passthrough_before
 
     regular = apply_deepseek_thinking_kwargs(
         config,
@@ -940,8 +951,8 @@ def test_custom_data_vendor_posts_to_configured_endpoint(monkeypatch):
         def json(self):
             return {"data": "custom news payload"}
 
-    def fake_post(url, headers, json, timeout):
-        calls.append({"url": url, "headers": headers, "json": json, "timeout": timeout})
+    def fake_post(url, headers, json, timeout, allow_redirects=False, **kwargs):
+        calls.append({"url": url, "headers": headers, "json": json, "timeout": timeout, "allow_redirects": allow_redirects})
         return FakeResponse()
 
     monkeypatch.setattr("web.backend.custom_data.requests.post", fake_post)
@@ -971,6 +982,7 @@ def test_custom_data_vendor_posts_to_configured_endpoint(monkeypatch):
                 "kwargs": {"curr_date": "2026-05-01"},
             },
             "timeout": 30,
+            "allow_redirects": False,
         }
     ]
 
@@ -985,8 +997,8 @@ def test_model_discovery_fetches_openai_compatible_models(monkeypatch):
         def json(self):
             return {"data": [{"id": "moonshot-v1-8k"}, {"id": "moonshot-v1-32k"}]}
 
-    def fake_get(url, headers=None, params=None, timeout=None):
-        calls.append({"url": url, "headers": headers, "params": params, "timeout": timeout})
+    def fake_get(url, headers=None, params=None, timeout=None, allow_redirects=False, **kwargs):
+        calls.append({"url": url, "headers": headers, "params": params, "timeout": timeout, "allow_redirects": allow_redirects})
         return FakeResponse()
 
     monkeypatch.setattr("web.backend.model_discovery.requests.get", fake_get)
@@ -1002,7 +1014,8 @@ def test_model_discovery_fetches_openai_compatible_models(monkeypatch):
             "url": "https://api.moonshot.cn/v1/models",
             "headers": {"Authorization": "Bearer moonshot-key"},
             "params": None,
-            "timeout": 20,
+            "timeout": 30,
+            "allow_redirects": False,
         }
     ]
 
@@ -1585,6 +1598,10 @@ def test_run_manager_wraps_market_profile_before_graph_call(monkeypatch, tmp_pat
     assert run.status == "succeeded"
     assert run.request.ticker == "0700.hk"
     assert captured["resolved_ticker"] == "0700.hk"
-    assert captured["messages"][0][0] == "system"
-    assert "Hong Kong" in captured["messages"][0][1]
-    assert "1.35" in captured["messages"][0][1]
+    # The first message must be a real langchain SystemMessage (not a
+    # tuple), otherwise the downstream graph nodes fail to consume it.
+    from langchain_core.messages import SystemMessage
+
+    assert isinstance(captured["messages"][0], SystemMessage)
+    assert "Hong Kong" in captured["messages"][0].content
+    assert "1.35" in captured["messages"][0].content
