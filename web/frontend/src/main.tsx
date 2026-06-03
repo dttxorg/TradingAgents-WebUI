@@ -87,6 +87,7 @@ import { messages, type Locale } from './i18n/messages';
 import { Field } from './components/Field';
 import { SaveButton } from './components/SaveButton';
 import { Chip } from './components/Chip';
+import { Modal } from './components/Modal';
 
 type ViewMode = 'workspace' | 'settings';
 type SettingsSection = 'model' | 'market' | 'data' | 'routes' | 'backtest' | 'billing' | 'users';
@@ -2327,34 +2328,34 @@ function App() {
 
         </aside>
         {isReaderOpen && (
-          <div className="reader-overlay" role="dialog" aria-modal="true" aria-label={t.reports}>
-            <section className="reader-modal">
-              <div className="reader-modal-header">
-                <div>
-                  <span>{t.reports}</span>
-                  <strong>{activeReportTitle}</strong>
-                </div>
-                <button className="icon-button" onClick={() => setReaderOpen(false)} aria-label={t.closeReportReader} title={t.closeReportReader}>
-                  <X size={17} />
-                </button>
+          <Modal
+            open
+            onClose={() => setReaderOpen(false)}
+            title={t.reports}
+            header={
+              <div>
+                <span>{t.reports}</span>
+                <strong>{activeReportTitle}</strong>
               </div>
-              {reportContext}
-              {renderReportReader()}
-            </section>
-          </div>
+            }
+          >
+            {reportContext}
+            {renderReportReader()}
+          </Modal>
         )}
         {pendingRun && (
-          <div className="reader-overlay" role="dialog" aria-modal="true" aria-label={t.confirmRunTitle}>
-            <section className="confirm-modal">
-              <div className="reader-modal-header">
-                <div>
-                  <span>{t.runAnalysis}</span>
-                  <strong>{t.confirmRunTitle}</strong>
-                </div>
-                <button className="icon-button" onClick={() => setPendingRun(null)} aria-label={t.cancel} title={t.cancel}>
-                  <X size={17} />
-                </button>
+          <Modal
+            open
+            onClose={() => setPendingRun(null)}
+            title={t.confirmRunTitle}
+            header={
+              <div>
+                <span>{t.runAnalysis}</span>
+                <strong>{t.confirmRunTitle}</strong>
               </div>
+            }
+          >
+            <div className="confirm-modal">
               <p className="hint">{t.confirmRunBody}</p>
               <div className="confirm-metrics">
                 <Metric label={t.estimatedFreeze} value={formatMoney(pendingRun.estimate.preauthorizedAmount, pendingRun.estimate.currency)} />
@@ -2377,8 +2378,8 @@ function App() {
                   {t.confirmStart}
                 </button>
               </div>
-            </section>
-          </div>
+            </div>
+          </Modal>
         )}
         </section>
       )}
