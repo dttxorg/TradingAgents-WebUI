@@ -1334,10 +1334,9 @@ function App() {
                     ))}
                   </select>
                 </Field>
-                <label className="field">
-                  <span>{t.providerRegion}</span>
+                <Field label={t.providerRegion}>
                   <input value={provider?.region ?? '-'} readOnly />
-                </label>
+                  </Field>
                 <label className="field wide">
                   <span>{t.baseUrl}</span>
                   <input
@@ -1390,8 +1389,7 @@ function App() {
               )}
               {showDeepSeekThinkingMode && (
                 <div className="settings-thinking-row">
-                  <label className="field">
-                    <span>{t.deepseekThinkingMode}</span>
+                  <Field label={t.deepseekThinkingMode}>
                     <select
                       value={config.deepseekThinkingMode ?? 'disabled'}
                       onChange={(event) => updateConfig('deepseekThinkingMode', event.target.value as WebConfig['deepseekThinkingMode'])}
@@ -1402,7 +1400,7 @@ function App() {
                         </option>
                       ))}
                     </select>
-                  </label>
+                    </Field>
                   <p className="inline-hint">{t.deepseekThinkingHint}</p>
                 </div>
               )}
@@ -1469,30 +1467,27 @@ function App() {
                         <span>{t.appendRegionSuffix}</span>
                       </label>
                       <div className="market-profile-fields">
-                        <label className="field">
-                          <span>{t.marketRegion}</span>
+                        <Field label={t.marketRegion}>
                           <input
                             value={profile.region}
                             onChange={(event) => updateMarketProfile(market.key, { region: event.target.value })}
                             placeholder={market.key === 'us' ? 'us' : market.key === 'hk' ? 'hk' : market.key === 'sh' ? 'ss' : 'sz'}
                           />
-                        </label>
-                        <label className="field">
-                          <span>{t.marketWeight}</span>
+                          </Field>
+                        <Field label={t.marketWeight}>
                           <input
                             value={profile.weight}
                             onChange={(event) => updateMarketProfile(market.key, { weight: event.target.value })}
                             inputMode="decimal"
                           />
-                        </label>
+                          </Field>
                       </div>
-                      <label className="field">
-                        <span>{t.marketPrompt}</span>
+                      <Field label={t.marketPrompt}>
                         <textarea
                           value={profile.marketProfile}
                           onChange={(event) => updateMarketProfile(market.key, { marketProfile: event.target.value })}
                         />
-                      </label>
+                        </Field>
                     </section>
                   );
                 })}
@@ -1509,8 +1504,7 @@ function App() {
             {settingsSection === 'data' && (
             <Panel title={t.dataVendors} icon={<Database size={17} />}>
               {metadata.dataVendorCategories.map((category) => (
-                <label key={category.key} className="field">
-                  <span>{dataVendorLabels[locale][category.key] ?? category.label}</span>
+                <Field key={category.key} label={dataVendorLabels[locale][category.key] ?? category.label}>
                   <select value={config.dataVendors[category.key] ?? ''} onChange={(event) => updateVendor(category.key, event.target.value)}>
                     {category.options.filter((option) => option !== 'custom').map((option) => (
                       <option key={option} value={option}>
@@ -1518,7 +1512,7 @@ function App() {
                       </option>
                     ))}
                   </select>
-                </label>
+                </Field>
               ))}
               <div className="section-title">
                 <ListOrdered size={16} />
@@ -1601,8 +1595,7 @@ function App() {
                           return (
                             <section key={`${section.key}-${category.key}`} className={selectedCustom ? 'market-route-card active' : 'market-route-card'}>
                               <div className="market-route-head">
-                                <label className="field">
-                                  <span>{dataVendorLabels[locale][category.key] ?? category.label}</span>
+                                <Field label={dataVendorLabels[locale][category.key] ?? category.label}>
                                   <select value={value} onChange={(event) => updateMarketGroupVendor(section.markets, category.key, event.target.value)}>
                                     <option value="">{t.inheritDefault} ({dataVendorOptionLabel(inherited, locale)})</option>
                                     {vendorOptions(category.options, { category: category.key, market: sectionMarket }).map((option) => (
@@ -1611,16 +1604,15 @@ function App() {
                                       </option>
                                     ))}
                                   </select>
-                                </label>
+                                  </Field>
                                 {selectedCustom && (
-                                  <label className="field">
-                                    <span>{t.baseUrl}</span>
+                                  <Field label={t.baseUrl}>
                                     <input
                                       value={settings.baseUrl ?? ''}
                                       onChange={(event) => updateMarketGroupCustomBaseUrl(section.markets, category.key, event.target.value)}
                                       placeholder="https://data.example.com"
                                     />
-                                  </label>
+                                    </Field>
                                 )}
                               </div>
                               <div className="method-vendor-list market-method-list">
@@ -1696,8 +1688,7 @@ function App() {
                       </div>
                       <p className="hint">{locale === 'zh' ? routeDescription(target.stage, target.parallelizable) : target.description}</p>
                       <div className="route-fields">
-                        <label className="field">
-                          <span>{t.provider}</span>
+                        <Field label={t.provider}>
                           <select value={route.provider ?? ''} onChange={(event) => updateLlmRoute(target.key, { provider: event.target.value || null })}>
                             <option value="">{t.inheritMainProvider}</option>
                             {metadata.providers.map((item) => (
@@ -1706,17 +1697,15 @@ function App() {
                               </option>
                             ))}
                           </select>
-                        </label>
-                        <label className="field">
-                          <span>{t.routeBaseUrl}</span>
+                          </Field>
+                        <Field label={t.routeBaseUrl}>
                           <input
                             value={route.backendUrl ?? ''}
                             onChange={(event) => updateLlmRoute(target.key, { backendUrl: event.target.value || null })}
                             placeholder={routeProviderMeta?.defaultBaseUrl ?? t.providerDefault}
                           />
-                        </label>
-                        <label className="field">
-                          <span>{t.routeModel}</span>
+                          </Field>
+                        <Field label={t.routeModel}>
                           <select value={route.modelId ?? ''} onChange={(event) => updateLlmRoute(target.key, { modelId: event.target.value || null })}>
                             <option value="">{modelForRole(config, target.defaultModelRole)}</option>
                             {routeModels.map((item) => (
@@ -1725,7 +1714,7 @@ function App() {
                               </option>
                             ))}
                           </select>
-                        </label>
+                          </Field>
                         <label className="secret-row route-secret">
                           <span>
                             {target.apiKeyField}
@@ -1778,8 +1767,7 @@ function App() {
                       />
                       <span>{t.checkpointResume}</span>
                     </label>
-                    <label className="field">
-                      <span>{t.intervalMinutes}</span>
+                    <Field label={t.intervalMinutes}>
                       <input
                         type="number"
                         min={5}
@@ -1787,9 +1775,8 @@ function App() {
                         value={backtestConfig.intervalMinutes}
                         onChange={(event) => updateBacktestConfig('intervalMinutes', clampNumber(event.target.value, 5, 43200))}
                       />
-                    </label>
-                    <label className="field">
-                      <span>{t.reviewWindowDays}</span>
+                      </Field>
+                    <Field label={t.reviewWindowDays}>
                       <input
                         type="number"
                         min={1}
@@ -1797,9 +1784,8 @@ function App() {
                         value={backtestConfig.reviewWindowDays}
                         onChange={(event) => updateBacktestConfig('reviewWindowDays', clampNumber(event.target.value, 1, 3650))}
                       />
-                    </label>
-                    <label className="field">
-                      <span>{t.maxReportsPerCycle}</span>
+                      </Field>
+                    <Field label={t.maxReportsPerCycle}>
                       <input
                         type="number"
                         min={1}
@@ -1807,34 +1793,31 @@ function App() {
                         value={backtestConfig.maxReportsPerCycle}
                         onChange={(event) => updateBacktestConfig('maxReportsPerCycle', clampNumber(event.target.value, 1, 500))}
                       />
-                    </label>
-                    <label className="field">
-                      <span>{t.priceDataSource}</span>
+                      </Field>
+                    <Field label={t.priceDataSource}>
                       <select value={backtestConfig.priceDataSource} onChange={(event) => updateBacktestConfig('priceDataSource', event.target.value as BacktestScheduleConfig['priceDataSource'])}>
                         <option value="yfinance">yfinance</option>
                         <option value="custom">custom</option>
                       </select>
-                    </label>
+                      </Field>
                   </div>
 
                   <div className={backtestConfig.priceDataSource === 'custom' ? 'custom-interface active' : 'custom-interface'}>
                     <div className="endpoint-grid">
-                      <label className="field">
-                        <span>{t.customBacktestApi}</span>
+                      <Field label={t.customBacktestApi}>
                         <input
                           value={backtestConfig.customBaseUrl ?? ''}
                           onChange={(event) => updateBacktestConfig('customBaseUrl', event.target.value || null)}
                           placeholder="https://prices.example.com/api"
                         />
-                      </label>
-                      <label className="field">
-                        <span>{t.customBacktestEndpoint}</span>
+                        </Field>
+                      <Field label={t.customBacktestEndpoint}>
                         <input
                           value={backtestConfig.customEndpoint}
                           onChange={(event) => updateBacktestConfig('customEndpoint', event.target.value)}
                           placeholder="/backtest/prices"
                         />
-                      </label>
+                        </Field>
                     </div>
                     <label className="secret-row provider-secret">
                       <span>
@@ -1873,66 +1856,55 @@ function App() {
               {adminPricing ? (
                 <div className="billing-form">
                   <div className="form-grid billing-grid">
-                    <label className="field">
-                      <span>{t.billingMode}</span>
+                    <Field label={t.billingMode}>
                       <select value={adminPricing.billingMode} onChange={(event) => updateAdminPricing('billingMode', event.target.value as PricingConfig['billingMode'])}>
                         <option value="token">token</option>
                         <option value="per_run">per_run</option>
                         <option value="hybrid">hybrid</option>
                       </select>
-                    </label>
-                    <label className="field">
-                      <span>{t.tokenMultiplier}</span>
+                      </Field>
+                    <Field label={t.tokenMultiplier}>
                       <input value={adminPricing.tokenMultiplier} onChange={(event) => updateAdminPricing('tokenMultiplier', event.target.value)} inputMode="decimal" />
-                    </label>
-                    <label className="field">
-                      <span>{t.inputTokens} / 1M</span>
+                      </Field>
+                    <Field label={`${t.inputTokens} / 1M`}>
                       <input value={adminPricing.inputTokenPricePer1m} onChange={(event) => updateAdminPricing('inputTokenPricePer1m', event.target.value)} inputMode="decimal" />
-                    </label>
-                    <label className="field">
-                      <span>{t.outputTokens} / 1M</span>
+                    </Field>
+                    <Field label={`${t.outputTokens} / 1M`}>
                       <input value={adminPricing.outputTokenPricePer1m} onChange={(event) => updateAdminPricing('outputTokenPricePer1m', event.target.value)} inputMode="decimal" />
-                    </label>
-                    <label className="field">
-                      <span>{t.fixedCharge}</span>
+                    </Field>
+                    <Field label={t.fixedCharge}>
                       <input value={adminPricing.fixedRunPrice} onChange={(event) => updateAdminPricing('fixedRunPrice', event.target.value)} inputMode="decimal" />
-                    </label>
-                    <label className="field">
-                      <span>{t.preauth}</span>
+                      </Field>
+                    <Field label={t.preauth}>
                       <input value={adminPricing.preauthMultiplier} onChange={(event) => updateAdminPricing('preauthMultiplier', event.target.value)} inputMode="decimal" />
-                    </label>
+                      </Field>
                   </div>
                   <div className="depth-price-grid">
                     {(['1', '3', '5'] as const).map((depth) => (
                       <section key={depth} className="depth-price-card">
                         <strong>{researchDepthLabel(Number(depth), depth, locale)}</strong>
-                        <label className="field">
-                          <span>{t.tokenMultiplier}</span>
+                        <Field label={t.tokenMultiplier}>
                           <input value={adminPricing.depthMultipliers[depth] ?? '1'} onChange={(event) => updateDepthPrice('depthMultipliers', depth, event.target.value)} inputMode="decimal" />
-                        </label>
-                        <label className="field">
-                          <span>{t.fixedCharge}</span>
+                          </Field>
+                        <Field label={t.fixedCharge}>
                           <input value={adminPricing.fixedPricesByDepth[depth] ?? '0'} onChange={(event) => updateDepthPrice('fixedPricesByDepth', depth, event.target.value)} inputMode="decimal" />
-                        </label>
-                        <label className="field">
-                          <span>{t.inputTokens}</span>
+                          </Field>
+                        <Field label={t.inputTokens}>
                           <input value={adminPricing.estimatedInputTokensByDepth[depth] ?? 0} onChange={(event) => updateDepthPrice('estimatedInputTokensByDepth', depth, event.target.value)} inputMode="numeric" />
-                        </label>
-                        <label className="field">
-                          <span>{t.outputTokens}</span>
+                          </Field>
+                        <Field label={t.outputTokens}>
                           <input value={adminPricing.estimatedOutputTokensByDepth[depth] ?? 0} onChange={(event) => updateDepthPrice('estimatedOutputTokensByDepth', depth, event.target.value)} inputMode="numeric" />
-                        </label>
+                          </Field>
                       </section>
                     ))}
                   </div>
-                  <label className="field">
-                    <span>{t.modelOverrides}</span>
+                  <Field label={t.modelOverrides}>
                     <textarea
                       value={modelPriceDraft}
                       onChange={(event) => setModelPriceDraft(event.target.value)}
                       spellCheck={false}
                     />
-                  </label>
+                    </Field>
                   <button className="secondary full" onClick={saveAdminPricing} disabled={isSaving}>
                     <Save size={16} />
                     {t.saveDefaults}
@@ -2038,8 +2010,7 @@ function App() {
                 <textarea value={tickerList} onChange={(event) => changeTickerList(event.target.value)} placeholder="SPY, 0700, 600519, 000001" />
                 <small>{t.tickerListHint}</small>
               </label>
-              <label className="field">
-                <span>{t.stockMarket}</span>
+              <Field label={t.stockMarket}>
                 <select value={config.stockMarket} onChange={(event) => changeStockMarket(event.target.value)}>
                   {metadata.stockMarkets.map((market) => (
                     <option key={market.key} value={market.key}>
@@ -2048,19 +2019,17 @@ function App() {
                   ))}
                 </select>
                 <small className="field-hint">{t.effectiveTicker}: {effectiveTicker}</small>
-              </label>
-              <label className="field">
-                <span>{t.analysisDate}</span>
+                </Field>
+              <Field label={t.analysisDate}>
                 <input
                   type="date"
                   max={today()}
                   value={config.analysisDate}
                   onChange={(event) => updateConfig('analysisDate', event.target.value)}
                 />
-              </label>
+                </Field>
               {isAdmin && (
-                <label className="field">
-                  <span>{t.provider}</span>
+                <Field label={t.provider}>
                   <select
                     value={config.llmProvider}
                     onChange={(event) => changeProvider(event.target.value)}
@@ -2071,29 +2040,27 @@ function App() {
                       </option>
                     ))}
                   </select>
-                </label>
+                  </Field>
               )}
             </div>
 
             <div className={isAdmin ? 'tool-row' : 'tool-row single-control'}>
               {isAdmin && (customNeedsManualModel ? (
                 <>
-                  <label className="field">
-                    <span>{t.quickModel}</span>
+                  <Field label={t.quickModel}>
                     <input
                       value={config.quickThinkLlm}
                       onChange={(event) => updateConfig('quickThinkLlm', event.target.value)}
                       placeholder={t.customModelId}
                     />
-                  </label>
-                  <label className="field">
-                    <span>{t.deepModel}</span>
+                    </Field>
+                  <Field label={t.deepModel}>
                     <input
                       value={config.deepThinkLlm}
                       onChange={(event) => updateConfig('deepThinkLlm', event.target.value)}
                       placeholder={t.customModelId}
                     />
-                  </label>
+                    </Field>
                 </>
               ) : (
                 <>
@@ -2142,34 +2109,30 @@ function App() {
             {isAdmin && (
               <>
                 <div className="advanced-grid">
-                  <label className="field">
-                    <span>{t.openaiReasoning}</span>
+                  <Field label={t.openaiReasoning}>
                     <select value={config.openaiReasoningEffort ?? ''} onChange={(event) => updateConfig('openaiReasoningEffort', event.target.value || null)}>
                       <option value="">{t.providerDefault}</option>
                       <option value="low">{t.low}</option>
                       <option value="medium">{t.medium}</option>
                       <option value="high">{t.high}</option>
                     </select>
-                  </label>
-                  <label className="field">
-                    <span>{t.geminiThinking}</span>
+                    </Field>
+                  <Field label={t.geminiThinking}>
                     <select value={config.googleThinkingLevel ?? ''} onChange={(event) => updateConfig('googleThinkingLevel', event.target.value || null)}>
                       <option value="">{t.providerDefault}</option>
                       <option value="minimal">{t.minimal}</option>
                       <option value="high">{t.high}</option>
                     </select>
-                  </label>
-                  <label className="field">
-                    <span>{t.anthropicEffort}</span>
+                    </Field>
+                  <Field label={t.anthropicEffort}>
                     <select value={config.anthropicEffort ?? ''} onChange={(event) => updateConfig('anthropicEffort', event.target.value || null)}>
                       <option value="">{t.providerDefault}</option>
                       <option value="low">{t.low}</option>
                       <option value="medium">{t.medium}</option>
                       <option value="high">{t.high}</option>
                     </select>
-                  </label>
-                  <label className="field">
-                    <span>{t.parallelRuns}</span>
+                    </Field>
+                  <Field label={t.parallelRuns}>
                     <input
                       type="number"
                       min={1}
@@ -2177,7 +2140,7 @@ function App() {
                       value={config.maxParallelRuns}
                       onChange={(event) => updateConfig('maxParallelRuns', clampNumber(event.target.value, 1, 8))}
                     />
-                  </label>
+                    </Field>
                   <label className="toggle-row">
                     <input
                       type="checkbox"
