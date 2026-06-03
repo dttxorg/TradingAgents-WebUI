@@ -13,10 +13,14 @@ export interface ModalProps {
   open: boolean;
   onClose: () => void;
   title: string;
+  // Optional override for the header. The default header is an h2
+  // with the title; the report reader modal needs a richer header
+  // (eyebrow + bold title), so callers can pass a custom node.
+  header?: ReactNode;
   children: ReactNode;
 }
 
-export function Modal({ open, onClose, title, children }: ModalProps): ReactElement | null {
+export function Modal({ open, onClose, title, header, children }: ModalProps): ReactElement | null {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -31,8 +35,8 @@ export function Modal({ open, onClose, title, children }: ModalProps): ReactElem
   return (
     <div className="reader-overlay" role="dialog" aria-modal="true" aria-label={title}>
       <div className="reader-modal">
-        <header className="reader-header">
-          <h2>{title}</h2>
+        <header className="reader-modal-header">
+          {header !== undefined ? header : <h2>{title}</h2>}
           <button type="button" className="icon-button" onClick={onClose} aria-label="Close">
             <X />
           </button>
