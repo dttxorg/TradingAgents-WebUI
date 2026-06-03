@@ -84,6 +84,7 @@ import {
 } from './configMapping';
 import './styles.css';
 import { messages, type Locale } from './i18n/messages';
+import { Field } from './components/Field';
 
 type ViewMode = 'workspace' | 'settings';
 type SettingsSection = 'model' | 'market' | 'data' | 'routes' | 'backtest' | 'billing' | 'users';
@@ -1324,8 +1325,7 @@ function App() {
             {settingsSection === 'model' && (
             <Panel title={t.connectionSettings} icon={<Settings2 size={17} />}>
               <div className="form-grid settings-form">
-                <label className="field">
-                  <span>{t.provider}</span>
+                <Field label={t.provider}>
                   <select value={config.llmProvider} onChange={(event) => changeProvider(event.target.value)}>
                     {metadata.providers.map((item) => (
                       <option key={item.value} value={item.value}>
@@ -1333,7 +1333,7 @@ function App() {
                       </option>
                     ))}
                   </select>
-                </label>
+                </Field>
                 <label className="field">
                   <span>{t.providerRegion}</span>
                   <input value={provider?.region ?? '-'} readOnly />
@@ -2506,24 +2506,20 @@ function AuthScreen({
             <span>{error}</span>
           </div>
         )}
-        <label className="field">
-          <span>{labels.username}</span>
+        <Field label={labels.username}>
           <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />
-        </label>
-        <label className="field">
-          <span>{labels.password}</span>
+        </Field>
+        <Field label={labels.password}>
           <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === 'bootstrap' ? 'new-password' : 'current-password'} />
-        </label>
+        </Field>
         {mode === 'bootstrap' && (
           <>
-            <label className="field">
-              <span>{labels.displayName}</span>
+            <Field label={labels.displayName}>
               <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
-            </label>
-            <label className="field">
-              <span>{labels.initialBalance}</span>
+            </Field>
+            <Field label={labels.initialBalance}>
               <input value={initialBalance} onChange={(event) => setInitialBalance(event.target.value)} inputMode="decimal" />
-            </label>
+            </Field>
           </>
         )}
         <button className="primary full" type="submit" disabled={loading}>
