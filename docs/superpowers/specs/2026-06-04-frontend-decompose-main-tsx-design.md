@@ -321,7 +321,23 @@ extracting sub-components within a view is a follow-up.
 5. **Workspace view file ballooning.** If `WorkspaceView.tsx`
    exceeds ~700 lines, we will re-split it during the round. The
    right rail (history, orders, events) is a natural sub-component
-   boundary.
+   boundary. The split happens as an extra commit on top of the
+   seven planned ones; it does not block the round from finishing.
+
+## Done-criteria checklist
+
+Before declaring the round done, the following must be true. They
+are evaluated as a single pass at the end of the last commit.
+
+- [ ] `npm run build` exits 0
+- [ ] `pytest tests/` reports 47 passed (no backend change)
+- [ ] `wc -l web/frontend/src/main.tsx` is 1500 or fewer
+- [ ] `ls web/frontend/src/components/` lists 5 files
+- [ ] `ls web/frontend/src/views/` lists 4 files
+- [ ] `ls web/frontend/src/views/settings/` lists 7 files
+- [ ] `ls web/frontend/src/i18n/` lists 2 files
+- [ ] Manual smoke test walks all 6 paths listed in *Validation*
+      without visual regression
 
 ## Validation
 
