@@ -86,6 +86,7 @@ import './styles.css';
 import { messages, type Locale } from './i18n/messages';
 import { Field } from './components/Field';
 import { SaveButton } from './components/SaveButton';
+import { Chip } from './components/Chip';
 
 type ViewMode = 'workspace' | 'settings';
 type SettingsSection = 'model' | 'market' | 'data' | 'routes' | 'backtest' | 'billing' | 'users';
@@ -1412,13 +1413,13 @@ function App() {
               </div>
               <div className="chip-grid settings-language-grid">
                 {metadata.languages.map((language) => (
-                  <button
+                  <Chip
                     key={language.value}
-                    className={config.outputLanguage === language.value ? 'chip active' : 'chip'}
+                    active={config.outputLanguage === language.value}
                     onClick={() => updateConfig('outputLanguage', language.value)}
                   >
                     {language.label}
-                  </button>
+                  </Chip>
                 ))}
                 <input
                   className="chip-input"
@@ -2088,14 +2089,14 @@ function App() {
             </div>
             <div className="chip-grid">
               {metadata.analysts.map((analyst) => (
-                <button
+                <Chip
                   key={analyst.value}
-                  className={config.analysts.includes(analyst.value) ? 'chip active' : 'chip'}
+                  active={config.analysts.includes(analyst.value)}
                   onClick={() => toggleAnalyst(analyst.value)}
                 >
                   {config.analysts.includes(analyst.value) && <Check size={14} />}
                   {analystLabels[locale][analyst.value] ?? analyst.label}
-                </button>
+                </Chip>
               ))}
             </div>
 
