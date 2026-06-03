@@ -18,6 +18,7 @@ export interface ButtonProps {
   icon?: ReactNode;
   type?: 'button' | 'submit' | 'reset';
   onClick?: (e: MouseEvent<HTMLButtonElement>) => void;
+  className?: string;
   children: ReactNode;
 }
 
@@ -28,12 +29,20 @@ export function Button({
   icon,
   type = 'button',
   onClick,
+  className,
   children,
 }: ButtonProps): ReactElement {
+  // When the caller passes a className (e.g. "primary full"), merge it
+  // with the variant. The existing main.tsx buttons set both `primary`
+  // and a layout class like "full" together; the new code preserves
+  // both instead of dropping the layout class.
+  const mergedClass = className !== undefined
+    ? (variant === 'secondary' ? className : `${variant} ${className}`)
+    : variant;
   return (
     <button
       type={type}
-      className={variant}
+      className={mergedClass}
       disabled={disabled || loading}
       onClick={onClick}
     >

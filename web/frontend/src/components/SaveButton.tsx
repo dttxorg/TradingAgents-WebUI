@@ -11,12 +11,19 @@ export interface SaveButtonProps {
   loading?: boolean;
   disabled?: boolean;
   onClick?: () => void;
+  className?: string;
   children: ReactNode;
 }
 
 export function SaveButton(props: SaveButtonProps): ReactElement {
+  const { className, ...rest } = props;
   return (
-    <Button variant="primary" icon={<Save />} {...props}>
+    <Button
+      variant="primary"
+      icon={<Save />}
+      {...(className !== undefined ? { className } : {})}
+      {...rest}
+    >
       {props.children}
     </Button>
   );

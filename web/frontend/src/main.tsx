@@ -85,6 +85,7 @@ import {
 import './styles.css';
 import { messages, type Locale } from './i18n/messages';
 import { Field } from './components/Field';
+import { SaveButton } from './components/SaveButton';
 
 type ViewMode = 'workspace' | 'settings';
 type SettingsSection = 'model' | 'market' | 'data' | 'routes' | 'backtest' | 'billing' | 'users';
@@ -1428,14 +1429,12 @@ function App() {
               </div>
 
               <div className="actions-row">
-                <button className="secondary" onClick={saveSecrets} disabled={isSaving}>
-                  <Save size={16} />
+                <SaveButton onClick={saveSecrets} loading={isSaving}>
                   {t.saveSecrets}
-                </button>
-                <button className="secondary" onClick={saveConfig} disabled={isSaving}>
-                  <Save size={16} />
+                  </SaveButton>
+                <SaveButton onClick={saveConfig} loading={isSaving}>
                   {t.saveDefaults}
-                </button>
+                  </SaveButton>
               </div>
             </Panel>
             )}
@@ -1493,10 +1492,9 @@ function App() {
                 })}
               </div>
               <div className="actions-row">
-                <button className="secondary" onClick={saveConfig} disabled={isSaving}>
-                  <Save size={16} />
+                <SaveButton onClick={saveConfig} loading={isSaving}>
                   {t.saveDefaults}
-                </button>
+                  </SaveButton>
               </div>
             </Panel>
             )}
@@ -1569,10 +1567,9 @@ function App() {
                       </label>
                     ))}
                   </div>
-                  <button className="secondary" onClick={saveSecrets} disabled={isSaving}>
-                    <Save size={16} />
+                  <SaveButton onClick={saveSecrets} loading={isSaving}>
                     {t.saveSecrets}
-                  </button>
+                  </SaveButton>
                 </section>
               )}
               <div className="market-data-list">
@@ -1734,14 +1731,12 @@ function App() {
                 })}
               </div>
               <div className="actions-row">
-                <button className="secondary" onClick={saveSecrets} disabled={isSaving}>
-                  <Save size={16} />
+                <SaveButton onClick={saveSecrets} loading={isSaving}>
                   {t.saveSecrets}
-                </button>
-                <button className="secondary" onClick={saveConfig} disabled={isSaving}>
-                  <Save size={16} />
+                  </SaveButton>
+                <SaveButton onClick={saveConfig} loading={isSaving}>
                   {t.saveDefaults}
-                </button>
+                  </SaveButton>
               </div>
             </Panel>
             )}
@@ -1838,10 +1833,9 @@ function App() {
                       ? 'custom 复盘行情接口应返回 bars/data 数组，每项包含 date、open、high、low、close。已完成的复盘记录不会再次执行；等待数据或失败的记录会从检查点续跑。'
                       : 'A custom review price API should return a bars/data array with date, open, high, low, close. Completed review records are not rerun; waiting-data or failed records resume from checkpoints.'}
                   </p>
-                  <button className="secondary full" onClick={saveBacktestSettings} disabled={isSaving}>
-                    <Save size={16} />
+                  <SaveButton onClick={saveBacktestSettings} loading={isSaving} className="full">
                     {t.saveBacktestSettings}
-                  </button>
+                  </SaveButton>
                 </div>
               ) : (
                 <span className="empty">-</span>
@@ -1905,10 +1899,9 @@ function App() {
                       spellCheck={false}
                     />
                     </Field>
-                  <button className="secondary full" onClick={saveAdminPricing} disabled={isSaving}>
-                    <Save size={16} />
+                  <SaveButton onClick={saveAdminPricing} loading={isSaving} className="full">
                     {t.saveDefaults}
-                  </button>
+                  </SaveButton>
                 </div>
               ) : (
                 <span className="empty">-</span>
@@ -2152,10 +2145,9 @@ function App() {
                 </div>
 
                 <div className="actions-row">
-                  <button className="secondary" onClick={saveConfig} disabled={isSaving}>
-                    <Save size={16} />
+                  <SaveButton onClick={saveConfig} loading={isSaving}>
                     {t.saveDefaults}
-                  </button>
+                  </SaveButton>
                 </div>
               </>
             )}
