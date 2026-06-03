@@ -231,6 +231,11 @@ This section is for operators pulling a new build that contains
 `fix: harden web ui against 40+ security, billing, and concurrency bugs`
 (commit `5362b8a` and later on `webui/main`).
 
+The full set of behavioural changes, including recovery steps for
+each, lives in [`UPGRADING.md`](UPGRADING.md). The README only
+lists the most common ones. Read the dedicated document before
+upgrading a production deployment.
+
 ### Behavioural changes that may affect you
 
 1. **Multi-worker `uvicorn --workers N` now refuses to start.** The
@@ -278,6 +283,10 @@ This section is for operators pulling a new build that contains
 10. **SSE reconnects honour `Last-Event-ID`.** Reconnecting clients
     resume from the event they last saw, and the stream yields an
     `id:` line on every event.
+
+For the full list of 19 behavioural changes, the operator
+pre-flight checklist, and rollback notes, see
+[`UPGRADING.md`](UPGRADING.md).
 
 ### New environment variables
 
