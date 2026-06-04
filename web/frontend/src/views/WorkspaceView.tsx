@@ -28,10 +28,17 @@ export function WorkspaceView({ state, handlers, helpers }: WorkspaceViewProps):
   const researchDepthLabel = helpers.researchDepthLabel;
   const orderTypeLabel = helpers.orderTypeLabel;
   const eventSummary = helpers.eventSummary;
-  const stockMarketLabels = helpers.stockMarketLabels ?? state.stockMarketLabels;
-  const analystLabels = helpers.analystLabels ?? state.analystLabels;
-  const agentLabels = helpers.agentLabels ?? state.agentLabels;
-  const eventLabels = helpers.eventLabels ?? state.eventLabels;
+  // Defensive fallbacks: helpers.eventLabels etc may be undefined in
+  // any of the calling paths that construct a partial helpers object
+  // (e.g. Storybook, tests, or any future caller that omits them).
+  // Without the ?? chain, a missing helper or a missing state prop
+  // would throw "Cannot read properties of undefined (reading 'zh')"
+  // during the post-login render, which silently unmounted the React
+  // tree before the ErrorBoundary landed.
+  const stockMarketLabels = helpers?.stockMarketLabels ?? state?.stockMarketLabels ?? {};
+  const analystLabels = helpers?.analystLabels ?? state?.analystLabels ?? {};
+  const agentLabels = helpers?.agentLabels ?? state?.agentLabels ?? {};
+  const eventLabels = helpers?.eventLabels ?? state?.eventLabels ?? {};
   const reportContext = state.reportContext;
   const renderReportReader = helpers.renderReportReader;
 
@@ -121,7 +128,7 @@ export function WorkspaceView({ state, handlers, helpers }: WorkspaceViewProps):
               <select value={config.stockMarket} onChange={(event) => handlers.changeStockMarket(event.target.value)}>
                 {metadata.stockMarkets.map((market: any) => (
                   <option key={market.key} value={market.key}>
-                    {stockMarketLabels[locale][market.key] ?? market.label}
+                    {stockMarketLabels[locale]?.[market.key] ?? market.label}
                   </option>
                 ))}
               </select>
@@ -211,7 +218,7 @@ export function WorkspaceView({ state, handlers, helpers }: WorkspaceViewProps):
                 onClick={() => handlers.toggleAnalyst(analyst.value)}
               >
                 {config.analysts.includes(analyst.value) && <helpers.Check size={14} />}
-                {analystLabels[locale][analyst.value] ?? analyst.label}
+                {analystLabels[locale]?.[analyst.value] ?? analyst.label}
               </Chip>
             ))}
           </div>
@@ -306,7 +313,7 @@ export function WorkspaceView({ state, handlers, helpers }: WorkspaceViewProps):
               return (
               <span key={agent} className={`agent ${status}`}>
                 <helpers.BadgeCheck size={15} />
-                {agentLabels[outputLocale][agent] ?? agent}
+                {agentLabels[outputLocale]?.[agent] ?? agent}
                 <small>{statusLabel(status, outputLocale)}</small>
               </span>
               );
@@ -458,7 +465,7 @@ export function WorkspaceView({ state, handlers, helpers }: WorkspaceViewProps):
           <div className="event-list">
             {[...events].reverse().slice(0, 30).map((event) => (
               <div key={`${event.id}-${event.timestamp}`} className="event-row">
-                <span>{eventLabels[outputLocale][event.type] ?? event.type}</span>
+                <span>{eventLabels[outputLocale]?.[event.type] ?? event.type}</span>
                 <p>{eventSummary(event, outputLocale)}</p>
               </div>
             ))}

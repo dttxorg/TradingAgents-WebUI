@@ -1783,7 +1783,7 @@ function modelForRole(config: WebConfig, role: 'quick' | 'deep') {
 }
 
 function routeLabel(value: string, locale: Locale) {
-  return agentLabels[locale][value] ?? value;
+  return agentLabels[locale]?.[value] ?? value;
 }
 
 function routeDescription(stage: string, parallelizable: boolean) {
