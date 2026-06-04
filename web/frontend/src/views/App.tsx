@@ -895,6 +895,9 @@ export function App() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setRunning(false);
+      // close any SSE the partial attachEvents may have opened
+      eventSourceRef.current?.close();
+      if (eventSourceRef.current) eventSourceRef.current = null;
     }
   }
 
@@ -982,9 +985,18 @@ export function App() {
       source.addEventListener(name, onEvent);
     });
     source.onerror = () => {
-      source.close();
-      if (eventSourceRef.current === source) eventSourceRef.current = null;
-      setRunning(false);
+      // EventSource auto-reconnects per the SSE spec; the previous
+      // implementation closed on every error and dropped out of the
+      // backoff-retry window, which surfaced as a stuck 'running'
+      // state when the network blipped during a long run.
+      // Only shut down once the source is genuinely CLOSED, i.e.
+      // the auto-retry window has been exhausted.
+      if (source.readyState === EventSource.CLOSED) {
+        source.close();
+        if (eventSourceRef.current === source) eventSourceRef.current = null;
+        setRunning(false);
+        setError('SSE connection closed unexpectedly.');
+      }
     };
   }
 
