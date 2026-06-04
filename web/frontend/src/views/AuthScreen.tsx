@@ -54,6 +54,9 @@ export function AuthScreen({
         mode === 'bootstrap'
           ? await api.bootstrap({ username: trimmedUsername, password, displayName: displayName || null, initialBalance })
           : await api.login(trimmedUsername, password);
+      if (!session || !session.user) {
+        throw new Error('Invalid session: missing user.');
+      }
       await onAuthenticated(session.user);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

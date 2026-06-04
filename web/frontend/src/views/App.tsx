@@ -413,9 +413,19 @@ export function App() {
   }
 
   async function handleAuthenticated(sessionUser: User) {
+    setError(null);
+    // Load workspace data BEFORE marking the user as authenticated.
+    // If loadWorkspaceData throws, currentUser stays unset and
+    // the AuthScreen remains mounted so the user can retry.
+    try {
+      await loadWorkspaceData(sessionUser);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setCurrentUser(null);
+      return;
+    }
     setCurrentUser(sessionUser);
     setBootstrapRequired(false);
-    await loadWorkspaceData(sessionUser);
   }
 
   async function signOut() {
