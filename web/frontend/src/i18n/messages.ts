@@ -8,6 +8,10 @@ export type Locale = 'en' | 'zh';
 
 export const messages: Record<Locale, Record<string, string>> = {
   en: {
+    errorBoundaryTitle: 'Something went wrong',
+    errorBoundaryMessage:
+      'The page crashed before it could finish loading. The error has been reported to the server. You can reload to try again, or sign out and back in.',
+    errorBoundaryReload: 'Reload page',
     loading: 'Loading TradingAgents console',
     eyebrow: 'TradingAgents Web Console',
     title: 'Multi-agent market research workspace',
@@ -43,7 +47,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     analysisSetup: 'Analysis setup',
     ticker: 'Ticker',
     tickerList: 'Ticker list',
-    tickerListHint: 'Enter bare symbols. The selected market profile appends the configured region suffix automatically.',
+    tickerListHint: 'Enter bare symbols. US tickers stay bare (AAPL). HK / SH / SZ tickers get a region suffix (0700.HK, 600519.SS, 000001.SZ) unless disabled in Settings → Market.',
     stockMarket: 'Stock market',
     marketSettings: 'Market profiles',
     marketRegion: 'Region suffix',
@@ -245,6 +249,10 @@ export const messages: Record<Locale, Record<string, string>> = {
     cancel: 'Cancel',
   },
   zh: {
+    errorBoundaryTitle: '页面出错了',
+    errorBoundaryMessage:
+      '页面在加载过程中崩溃了。错误已自动上报到服务器。你可以点击下方按钮刷新页面，或退出后重新登录。',
+    errorBoundaryReload: '刷新页面',
     loading: '正在加载 TradingAgents 控制台',
     eyebrow: 'TradingAgents Web 控制台',
     title: '多智能体金融市场研究工作台',
@@ -280,7 +288,7 @@ export const messages: Record<Locale, Record<string, string>> = {
     analysisSetup: '分析配置',
     ticker: '股票代码',
     tickerList: '股票列表',
-    tickerListHint: '只输入裸股票代码，不需要填写点号；系统会按所选市场自动追加配置的 region 后缀。',
+    tickerListHint: '只输入裸股票代码。美股保持原样（如 AAPL）。港股 / 上证 / 深证自动追加 region 后缀（0700.HK、600519.SS、000001.SZ），可在"设置 → 市场"中关闭。',
     stockMarket: '股票市场',
     marketSettings: '市场配置',
     marketRegion: 'Region 后缀',

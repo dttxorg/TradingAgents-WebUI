@@ -103,7 +103,12 @@ const ASHARE_FUNDAMENTALS_ENV =
   ((import.meta as ImportMetaWithEnv).env?.VITE_ASHARE_FUNDAMENTALS_URL ?? '').trim();
 
 const analystLabels: Record<Locale, Record<string, string>> = {
-  en: {},
+  en: {
+    market: 'Market Analyst',
+    social: 'Sentiment Analyst',
+    news: 'News Analyst',
+    fundamentals: 'Fundamentals Analyst',
+  },
   zh: {
     market: '市场分析师',
     social: '社交情绪分析师',
@@ -113,7 +118,12 @@ const analystLabels: Record<Locale, Record<string, string>> = {
 };
 
 const dataVendorLabels: Record<Locale, Record<string, string>> = {
-  en: {},
+  en: {
+    core_stock_apis: 'Core Stock APIs',
+    technical_indicators: 'Technical Indicators',
+    fundamental_data: 'Fundamental Data',
+    news_data: 'News Data',
+  },
   zh: {
     core_stock_apis: '核心股票接口',
     technical_indicators: '技术指标',
@@ -133,7 +143,17 @@ const stockMarketLabels: Record<Locale, Record<string, string>> = {
 };
 
 const customMethodLabels: Record<Locale, Record<string, string>> = {
-  en: {},
+  en: {
+    get_stock_data: 'Stock prices',
+    get_indicators: 'Technical indicators',
+    get_fundamentals: 'Fundamentals',
+    get_balance_sheet: 'Balance sheet',
+    get_cashflow: 'Cash flow',
+    get_income_statement: 'Income statement',
+    get_news: 'Ticker news',
+    get_global_news: 'Global news',
+    get_insider_transactions: 'Insider transactions',
+  },
   zh: {
     get_stock_data: '股票价格',
     get_indicators: '技术指标',
@@ -148,7 +168,19 @@ const customMethodLabels: Record<Locale, Record<string, string>> = {
 };
 
 const reportLabels: Record<Locale, Record<string, string>> = {
-  en: {},
+  en: {
+    market_report: 'Market Analysis',
+    sentiment_report: 'Sentiment Analysis',
+    news_report: 'News Analysis',
+    fundamentals_report: 'Fundamentals Analysis',
+    investment_debate_state: 'Research Debate',
+    investment_plan: 'Research Plan',
+    trader_investment_plan: 'Trader Plan',
+    risk_debate_state: 'Risk Debate',
+    final_trade_decision: 'Final Trade Decision',
+    buffett_review: 'Buffett Reference',
+    munger_review: 'Munger Reference',
+  },
   zh: {
     market_report: '市场分析',
     sentiment_report: '情绪分析',
@@ -165,7 +197,15 @@ const reportLabels: Record<Locale, Record<string, string>> = {
 };
 
 const eventLabels: Record<Locale, Record<string, string>> = {
-  en: {},
+  en: {
+    status: 'Status',
+    progress: 'Progress',
+    message: 'Message',
+    tool: 'Tool',
+    llm: 'Model',
+    configuration: 'Configuration',
+    reports: 'Reports',
+  },
   zh: {
     status: '状态',
     progress: '进度',
@@ -214,9 +254,26 @@ const emptyMetadata: Metadata = {
 };
 
 function detectLocale(): Locale {
-  const saved = window.localStorage.getItem('tradingagents-webui-locale');
-  if (saved === 'en' || saved === 'zh') return saved;
-  return navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en';
+  // Strict whitelist: only persist a value we know how to render.
+  // Anything else (a stale value from a prior schema, a third-party
+  // extension writing into localStorage, a manual edit) falls back
+  // to the navigator language. Without the try/catch and the
+  // typeof guard, a failing localStorage access or a missing
+  // navigator.language (private mode in some browsers) can throw
+  // and turn the page into a blank React tree.
+  try {
+    const saved = window.localStorage.getItem('tradingagents-webui-locale');
+    if (saved === 'en' || saved === 'zh') return saved;
+  } catch {
+    // localStorage can throw in private mode / disabled storage.
+  }
+  try {
+    const nav = typeof navigator !== 'undefined' ? navigator.language : '';
+    if (typeof nav === 'string' && nav.toLowerCase().startsWith('zh')) return 'zh';
+  } catch {
+    // navigator.language is not always present.
+  }
+  return 'en';
 }
 
 function today() {
@@ -1027,7 +1084,11 @@ export function App() {
   const timeEstimate = estimateRunTime(events, agentStatus, progress, activeRun, locale);
   const configuredTickerCount = parseTickerList(tickerList || config.ticker).length || 1;
   const firstInputTicker = parseTickerList(tickerList || config.ticker)[0] ?? config.ticker;
-  const effectiveTicker = formatMarketTicker(firstInputTicker, currentMarketProfile);
+  const effectiveTicker = formatMarketTicker(
+    firstInputTicker,
+    config?.stockMarket ?? 'us',
+    currentMarketProfile,
+  );
   const marketDataRouteCount = Object.values(config.marketDataOverrides ?? {}).reduce(
     (total, override) => total + Object.keys(override.dataVendors ?? {}).length + Object.keys(override.toolVendors ?? {}).length,
     0,
@@ -1849,8 +1910,20 @@ function parseTickerList(value: string) {
   return tickers.slice(0, 50);
 }
 
-function formatMarketTicker(ticker: string, profile?: { region?: string | null; appendRegionSuffix?: boolean | null }) {
+function formatMarketTicker(
+  ticker: string,
+  market: string,
+  profile?: { region?: string | null; appendRegionSuffix?: boolean | null },
+) {
   const symbol = ticker.trim().replace(/\s+/g, '').toUpperCase();
+  // US is the default market; bare tickers stay bare. This mirrors the
+  // backend's short-circuit in web/backend/markets.py:format_market_ticker
+  // so the runtime symbol the user sees in the UI matches what the
+  // agent actually receives. Without this guard, an admin toggling
+  // "Append suffix" on the US profile in Settings would produce
+  // AAPL.us in the UI while the backend kept submitting AAPL — a
+  // silent frontend/backend divergence.
+  if (market === 'us') return symbol;
   if (profile?.appendRegionSuffix === false) return symbol;
   const region = profile?.region?.trim().replace(/^\.+/, '') ?? '';
   if (!symbol || !region || symbol.includes('.')) return symbol;

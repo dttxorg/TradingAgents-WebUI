@@ -17,6 +17,7 @@ from requests import RequestException
 from .auth import SESSION_COOKIE, get_failed_login_tracker
 from .backtesting import BacktestEngine, BacktestScheduler
 from .constants import metadata_payload
+from .diagnostics import configure_diagnostics_logging, router as diagnostics_router
 from .model_discovery import fetch_provider_models
 from .runner import RunManager
 from .schemas import (
@@ -91,6 +92,11 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+
+# Diagnostics router is mounted before startup so that even a startup
+# error can be reported by a client that refreshes after the crash.
+app.include_router(diagnostics_router)
+configure_diagnostics_logging()
 
 
 @app.on_event("startup")

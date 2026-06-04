@@ -32,6 +32,18 @@ export function MarketPanel({ state, handlers, helpers }: MarketPanelProps): Rea
       <div className="market-profile-grid">
         {metadata.stockMarkets.map((market: any) => {
           const profile = config.marketProfiles?.[market.key] ?? { region: '', appendRegionSuffix: true, weight: '1', marketProfile: '' };
+          // US is the default market; bare US tickers stay bare in
+          // both the backend (web/backend/markets.py:format_market_ticker)
+          // and the frontend (App.tsx:formatMarketTicker). Lock the
+          // "Append suffix" toggle to off so an admin cannot create a
+          // silent frontend/backend divergence (UI shows AAPL.us while
+          // the agent still receives AAPL).
+          const isUsMarket = market.key === 'us';
+          const lockedToggleTitle = isUsMarket
+            ? (locale === 'zh'
+                ? '美股是默认市场，裸代码保持不变（后端永不追加 .us）'
+                : 'US is the default market; bare US tickers stay bare (the backend never appends .us)')
+            : '';
           return (
             <section key={market.key} className={config.stockMarket === market.key ? 'market-profile-card active' : 'market-profile-card'}>
               <div className="route-card-head">
@@ -40,13 +52,21 @@ export function MarketPanel({ state, handlers, helpers }: MarketPanelProps): Rea
                   <small>{market.description}</small>
                 </div>
               </div>
-              <label className="toggle-row compact-toggle">
+              <label className="toggle-row compact-toggle" title={lockedToggleTitle}>
                 <input
                   type="checkbox"
-                  checked={profile.appendRegionSuffix ?? true}
+                  checked={isUsMarket ? false : (profile.appendRegionSuffix ?? true)}
+                  disabled={isUsMarket}
                   onChange={(event) => updateMarketProfile(market.key, { appendRegionSuffix: event.target.checked })}
                 />
-                <span>{t.appendRegionSuffix}</span>
+                <span>
+                  {t.appendRegionSuffix}
+                  {isUsMarket && (
+                    <em className="locked-suffix-note">
+                      {locale === 'zh' ? ' （美股锁定关闭）' : ' (locked off for US)'}
+                    </em>
+                  )}
+                </span>
               </label>
               <div className="market-profile-fields">
                 <Field label={t.marketRegion}>
