@@ -334,16 +334,36 @@ export function App() {
   }
 
   useEffect(() => {
+    let cancelled = false;
     api.bootstrapStatus()
       .then(async (status) => {
+        if (cancelled) return;
         setBootstrapRequired(status.required);
         if (status.required) return;
         const session = await api.me();
+        if (cancelled) return;
         setCurrentUser(session.user);
-        await loadWorkspaceData(session.user);
+        try {
+          await loadWorkspaceData(session.user);
+        } catch (err) {
+          if (cancelled) return;
+          // Surface the failure instead of silently dropping the
+          // user into a half-loaded workspace. Reset currentUser
+          // so App re-mounts AuthScreen.
+          setError(err instanceof Error ? err.message : String(err));
+          setCurrentUser(null);
+        }
       })
-      .catch(() => undefined)
-      .finally(() => setAuthChecked(true));
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setAuthChecked(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
