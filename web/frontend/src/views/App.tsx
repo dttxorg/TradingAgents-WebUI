@@ -967,6 +967,14 @@ export function App() {
             api.reportHistory().then((value) => setHistory(value.items)).catch(() => undefined);
             refreshAccountAndBilling().catch(() => undefined);
           }
+        }).catch((err) => {
+          // /api/runs/{id} failing usually means the run is gone
+          // (server crash, restart, or 404). Close the stream and
+          // surface the error so the user can retry.
+          source.close();
+          if (eventSourceRef.current === source) eventSourceRef.current = null;
+          setRunning(false);
+          setError(err instanceof Error ? err.message : String(err));
         });
       }
     };
