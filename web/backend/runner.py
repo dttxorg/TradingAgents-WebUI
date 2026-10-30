@@ -38,6 +38,7 @@ from .llm_options import patched_tradingagents_llm_client_factory
 from .llm_routing import LLMRouter, parallel_initial_analyst_workflow, has_enabled_llm_routes, routed_workflow
 from .markets import apply_market_profile, format_market_ticker, market_profile_prompt
 from .reference_reviewers import (
+    DEFAULT_REVIEW_TIMEOUT_SECONDS,
     REVIEWER_AGENT_NAMES,
     REVIEWER_OUTPUT_KEYS,
     REVIEWER_ROUTE_KEYS,
@@ -754,11 +755,18 @@ class RunManager:
             self._emit_progress(run, message_buffer, stats_handler, start)
 
         if reviewer_llms:
+            timeout_seconds = int(
+                os.environ.get(
+                    "TRADINGAGENTS_REVIEW_TIMEOUT_SECONDS",
+                    str(DEFAULT_REVIEW_TIMEOUT_SECONDS),
+                )
+            )
             reference_reviews.update(
                 run_reference_reviews(
                     reviewer_llms,
                     final_state,
                     run.config.output_language,
+                    timeout_seconds=timeout_seconds,
                 )
             )
 

@@ -79,3 +79,22 @@ def test_reference_reviewer_skills_keep_full_upstream_assets():
     assert "查理·芒格 · 思维操作系统" in munger_skill
     assert len(buffett_skill.splitlines()) > 400
     assert len(munger_skill.splitlines()) > 400
+
+
+def test_reference_reviewers_trims_oversized_risk_debate():
+    llm = FakeReviewerLLM()
+    state = _state()
+    huge_history = "Point counterpoint " * 20000  # ~380k chars
+    state["risk_debate_state"] = {
+        "judge_decision": "**Rating**: Hold. Stay disciplined.",
+        "history": huge_history,
+    }
+
+    result = run_reference_reviews(llm, state, "Chinese")
+
+    assert result["buffett_review"] == "Buffett reference review."
+    assert result["munger_review"] == "Munger reference review."
+    for prompt in llm.prompts:
+        assert "**Rating**: Hold. Stay disciplined." in prompt
+        assert "[Debate transcript trimmed:" in prompt
+        assert len(prompt) < len(huge_history)

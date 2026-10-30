@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
 from pathlib import Path
 from typing import Any, Mapping
@@ -37,7 +38,7 @@ _REVIEWERS = {
 REVIEWER_ROUTE_KEYS = {key: reviewer["route"] for key, reviewer in _REVIEWERS.items()}
 REVIEWER_AGENT_NAMES = {key: reviewer["agent"] for key, reviewer in _REVIEWERS.items()}
 REVIEWER_OUTPUT_KEYS = {key: reviewer["output"] for key, reviewer in _REVIEWERS.items()}
-DEFAULT_REVIEW_TIMEOUT_SECONDS = 180
+DEFAULT_REVIEW_TIMEOUT_SECONDS = int(os.environ.get("TRADINGAGENTS_REVIEW_TIMEOUT_SECONDS", "600"))
 
 
 def _load_skill_text(skill_name: str) -> str:
@@ -58,8 +59,35 @@ def _content_text(response: Any) -> str:
     return str(content).strip()
 
 
+def _format_risk_context(risk_state: dict[str, Any] | Any, max_history_chars: int = 15000) -> str:
+    if not isinstance(risk_state, dict):
+        return str(risk_state or "")
+
+    parts: list[str] = []
+    judge_decision = str(risk_state.get("judge_decision") or "").strip()
+    if judge_decision:
+        parts.append(f"Risk Manager Decision / Assessment:\n{judge_decision}")
+
+    history = str(risk_state.get("history") or "").strip()
+    if history:
+        if len(history) > max_history_chars:
+            head_size = max_history_chars // 3
+            tail_size = max_history_chars - head_size
+            trimmed = (
+                history[:head_size]
+                + f"\n\n... [Debate transcript trimmed: {len(history) - max_history_chars} characters omitted for brevity] ...\n\n"
+                + history[-tail_size:]
+            )
+            parts.append(f"Risk Debate Transcript (excerpt):\n{trimmed}")
+        else:
+            parts.append(f"Risk Debate Transcript:\n{history}")
+
+    return "\n\n".join(parts) if parts else "None provided."
+
+
 def _prompt(reviewer: dict[str, str], skill_text: str, state: dict[str, Any], output_language: str) -> str:
     risk_state = state.get("risk_debate_state", {})
+    risk_context = _format_risk_context(risk_state)
     return f"""You are a post-run reference reviewer for a completed TradingAgents WebUI analysis.
 
 Use the complete upstream skill instructions below as your thinking framework. Preserve the full analytical method,
@@ -100,7 +128,7 @@ Trader transaction proposal:
 {state.get("trader_investment_plan", "")}
 
 Risk debate:
-{risk_state.get("history", "")}
+{risk_context}
 
 Portfolio Manager final decision:
 {state.get("final_trade_decision", "")}
